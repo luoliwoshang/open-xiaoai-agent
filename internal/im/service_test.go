@@ -208,3 +208,86 @@ func TestServiceDeleteAccountDisablesDelivery(t *testing.T) {
 		t.Fatalf("selection should be cleared, got account=%q target=%q", snapshot.IMSelectedAccountID, snapshot.IMSelectedTargetID)
 	}
 }
+
+func TestServiceDeleteNonSelectedTargetKeepsDeliverySelection(t *testing.T) {
+	t.Parallel()
+
+	dsn := "sqlite://" + t.TempDir() + "/agent.db"
+	settingsStore, err := settings.NewStore(dsn)
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	service, err := NewService(dsn, settingsStore)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	account, err := service.store.UpsertAccount("stub", "bot@im.bot", "user@im.wechat", "Bot", "https://example.com", "token")
+	if err != nil {
+		t.Fatalf("UpsertAccount() error = %v", err)
+	}
+	selectedTarget, err := service.store.UpsertTarget(account.ID, "主目标", "user-a@im.wechat", true)
+	if err != nil {
+		t.Fatalf("UpsertTarget() error = %v", err)
+	}
+	otherTarget, err := service.store.UpsertTarget(account.ID, "其他目标", "user-b@im.wechat", false)
+	if err != nil {
+		t.Fatalf("UpsertTarget() error = %v", err)
+	}
+	if _, err := service.UpdateDeliveryConfig(true, account.ID, selectedTarget.ID); err != nil {
+		t.Fatalf("UpdateDeliveryConfig() error = %v", err)
+	}
+
+	if err := service.DeleteTarget(otherTarget.ID); err != nil {
+		t.Fatalf("DeleteTarget() error = %v", err)
+	}
+
+	snapshot := settingsStore.Snapshot()
+	if !snapshot.IMDeliveryEnabled {
+		t.Fatal("IMDeliveryEnabled = false, want true")
+	}
+	if snapshot.IMSelectedAccountID != account.ID {
+		t.Fatalf("IMSelectedAccountID = %q, want %q", snapshot.IMSelectedAccountID, account.ID)
+	}
+	if snapshot.IMSelectedTargetID != selectedTarget.ID {
+		t.Fatalf("IMSelectedTargetID = %q, want %q", snapshot.IMSelectedTargetID, selectedTarget.ID)
+	}
+}
+
+func TestServiceDeleteSelectedTargetDisablesDelivery(t *testing.T) {
+	t.Parallel()
+
+	dsn := "sqlite://" + t.TempDir() + "/agent.db"
+	settingsStore, err := settings.NewStore(dsn)
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	service, err := NewService(dsn, settingsStore)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	account, err := service.store.UpsertAccount("stub", "bot@im.bot", "user@im.wechat", "Bot", "https://example.com", "token")
+	if err != nil {
+		t.Fatalf("UpsertAccount() error = %v", err)
+	}
+	target, err := service.store.UpsertTarget(account.ID, "主目标", "user-a@im.wechat", true)
+	if err != nil {
+		t.Fatalf("UpsertTarget() error = %v", err)
+	}
+	if _, err := service.UpdateDeliveryConfig(true, account.ID, target.ID); err != nil {
+		t.Fatalf("UpdateDeliveryConfig() error = %v", err)
+	}
+
+	if err := service.DeleteTarget(target.ID); err != nil {
+		t.Fatalf("DeleteTarget() error = %v", err)
+	}
+
+	snapshot := settingsStore.Snapshot()
+	if snapshot.IMDeliveryEnabled {
+		t.Fatal("IMDeliveryEnabled = true, want false")
+	}
+	if snapshot.IMSelectedAccountID != "" || snapshot.IMSelectedTargetID != "" {
+		t.Fatalf("selection should be cleared, got account=%q target=%q", snapshot.IMSelectedAccountID, snapshot.IMSelectedTargetID)
+	}
+}

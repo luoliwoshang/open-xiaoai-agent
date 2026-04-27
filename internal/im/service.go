@@ -315,8 +315,12 @@ func (s *Service) repairDeliveryConfigAfterMutation(accountID string, targetID s
 		return nil
 	}
 
+	accountID = strings.TrimSpace(accountID)
+	targetID = strings.TrimSpace(targetID)
 	current := s.settings.Snapshot()
-	if current.IMSelectedAccountID != strings.TrimSpace(accountID) && current.IMSelectedTargetID != strings.TrimSpace(targetID) {
+	removedSelectedAccount := targetID == "" && current.IMSelectedAccountID == accountID
+	removedSelectedTarget := targetID != "" && current.IMSelectedTargetID == targetID
+	if !removedSelectedAccount && !removedSelectedTarget {
 		return nil
 	}
 
