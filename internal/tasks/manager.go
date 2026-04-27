@@ -21,7 +21,10 @@ type Manager struct {
 }
 
 func NewManager(path string) (*Manager, error) {
-	store := NewStore(path)
+	store, err := NewStore(path)
+	if err != nil {
+		return nil, err
+	}
 	state, err := store.Load()
 	if err != nil {
 		return nil, err
@@ -447,6 +450,22 @@ func (m *Manager) clearCancel(taskID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.cancels, taskID)
+}
+
+func (m *Manager) Reset() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, cancel := range m.cancels {
+		cancel()
+	}
+	m.cancels = make(map[string]context.CancelFunc)
+	m.state = fileState{Version: 1}
+
+	if m.store == nil {
+		return nil
+	}
+	return m.store.Reset()
 }
 
 func (m *Manager) nextID(prefix string) string {

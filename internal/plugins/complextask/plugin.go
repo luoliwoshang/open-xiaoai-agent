@@ -25,6 +25,13 @@ func (s *Service) Snapshot() []Record {
 	return s.store.Snapshot()
 }
 
+func (s *Service) Reset() error {
+	if s == nil || s.store == nil {
+		return nil
+	}
+	return s.store.Reset()
+}
+
 func (s *Service) ResumeTask(ctx context.Context, taskID string, request string, reporter plugin.AsyncReporter) (string, error) {
 	if s == nil || s.runner == nil {
 		return "", fmt.Errorf("claude task service is not configured")

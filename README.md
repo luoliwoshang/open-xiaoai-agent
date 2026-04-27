@@ -67,7 +67,7 @@ flowchart TD
     D --> H[在合适的时候通知结果或新进展]
 ```
 
-异步任务的技术实现说明见 `docs` 目录中的异步任务说明文档。
+`docs` 目录中提供了两类补充说明：一份讲异步任务和主流程的协作结构，一份单独讲 Claude Code 的接入实现。
 
 ## 当前支持
 
@@ -76,7 +76,7 @@ flowchart TD
 - 使用 `reply` 模型流式生成回复，并通过设备侧 TTS 播放
 - 管理轻量异步任务，并在后续对话中补报进度
 - 提供独立的 React + Vite dashboard
-- 使用本地 JSON 文件保存任务、会话和插件私有状态
+- 使用 MySQL 保存任务、会话和插件私有状态
 
 当前内置工具：
 
@@ -108,6 +108,7 @@ flowchart TD
 
 - Go `1.24+`
 - Node.js + npm
+- MySQL `8.x+`
 - 一个可用的 OpenAI 兼容接口
 - 高德天气 API Key（仅 `ask_weather` 需要）
 - Claude Code CLI（仅 `complex_task` / `continue_task` 需要）
@@ -142,7 +143,19 @@ reply:
 
 `SOUL.md` 会在启动时一并读取，用于定义主回复的人设。`config.yaml` 已被忽略，不要提交真实密钥。
 
-3. 安装依赖并启动：
+3. 先准备数据库：
+
+```sql
+CREATE DATABASE open_xiaoai_agent CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+```
+
+4. 设置运行时数据库 DSN：
+
+```sh
+export OPEN_XIAOAI_AGENT_DSN='user:pass@tcp(127.0.0.1:3306)/open_xiaoai_agent'
+```
+
+5. 安装依赖并启动：
 
 ```sh
 npm install
@@ -209,7 +222,7 @@ npm run dev:web
 npm run build:web
 ```
 
-更多后端参数可用 `go run . -h` 查看，常见的有 `-addr`、`-dashboard-addr`、`-abort-after-asr`、`-parallel-intent-chat`。
+更多后端参数可用 `go run . -h` 查看，常见的有 `-addr`、`-dashboard-addr`、`-db-dsn`、`-abort-after-asr`、`-parallel-intent-chat`。如果不传 `-db-dsn`，程序会读取 `OPEN_XIAOAI_AGENT_DSN`。
 
 ## Dashboard API
 
@@ -217,6 +230,7 @@ Go 后端只提供 API，前端位于 `web/`。
 
 - `GET /api/healthz`
 - `GET /api/state`
+- `POST /api/reset`
 
 ## 验证
 
@@ -229,7 +243,7 @@ npm run build:web
 
 - 还没有独立的 IM Gateway
 - 还没有完善的人声打断检测
-- 持久化仍然是本地 JSON 文件，不是数据库方案
+- 当前依赖外部 MySQL 服务
 - 一些更激进的延迟优化还没有迁移到这个独立仓库
 
 ## 规划

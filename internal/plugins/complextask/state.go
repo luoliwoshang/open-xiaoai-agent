@@ -1,13 +1,13 @@
 package complextask
 
 import (
-	"encoding/json"
+	"database/sql"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/luoliwoshang/open-xiaoai-agent/internal/storage"
 )
 
 type Status string
@@ -40,12 +40,17 @@ type stateFile struct {
 
 type Store struct {
 	mu    sync.Mutex
-	path  string
+	db    *sql.DB
 	state stateFile
 }
 
-func NewStore(path string) (*Store, error) {
-	store := &Store{path: path}
+func NewStore(dsn string) (*Store, error) {
+	db, err := storage.OpenRuntimeDB(dsn)
+	if err != nil {
+		return nil, err
+	}
+
+	store := &Store{db: db}
 	state, err := store.load()
 	if err != nil {
 		return nil, err
@@ -69,10 +74,8 @@ func (s *Store) Get(taskID string) (Record, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	for _, record := range s.state.Records {
-		if record.TaskID == taskID {
-			return record, true
-		}
+	if record, ok := s.findLocked(taskID); ok {
+		return *record, true
 	}
 	return Record{}, false
 }
@@ -91,21 +94,21 @@ func (s *Store) Start(taskID string, prompt string, cwd string) error {
 }
 
 func (s *Store) MarkRunning(taskID string) error {
-	return s.mutate(taskID, func(record *Record, now time.Time) {
+	return s.mutateExisting(taskID, func(record *Record, now time.Time) {
 		record.Status = StatusRunning
 		record.UpdatedAt = now
 	})
 }
 
 func (s *Store) SetSession(taskID string, sessionID string) error {
-	return s.mutate(taskID, func(record *Record, now time.Time) {
+	return s.mutateExisting(taskID, func(record *Record, now time.Time) {
 		record.SessionID = sessionID
 		record.UpdatedAt = now
 	})
 }
 
 func (s *Store) UpdateSummary(taskID string, summary string, assistantText string) error {
-	return s.mutate(taskID, func(record *Record, now time.Time) {
+	return s.mutateExisting(taskID, func(record *Record, now time.Time) {
 		record.LastSummary = summary
 		if assistantText != "" {
 			record.LastAssistantText = assistantText
@@ -115,7 +118,7 @@ func (s *Store) UpdateSummary(taskID string, summary string, assistantText strin
 }
 
 func (s *Store) Complete(taskID string, result string) error {
-	return s.mutate(taskID, func(record *Record, now time.Time) {
+	return s.mutateExisting(taskID, func(record *Record, now time.Time) {
 		record.Status = StatusCompleted
 		record.Result = result
 		record.Error = ""
@@ -124,11 +127,25 @@ func (s *Store) Complete(taskID string, result string) error {
 }
 
 func (s *Store) Fail(taskID string, message string) error {
-	return s.mutate(taskID, func(record *Record, now time.Time) {
+	return s.mutateExisting(taskID, func(record *Record, now time.Time) {
 		record.Status = StatusFailed
 		record.Error = message
 		record.UpdatedAt = now
 	})
+}
+
+func (s *Store) Reset() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.state = stateFile{Version: 1}
+	if s.db == nil {
+		return nil
+	}
+	if _, err := s.db.Exec(`DELETE FROM claude_records`); err != nil {
+		return fmt.Errorf("reset claude records: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) mutate(taskID string, fn func(record *Record, now time.Time)) error {
@@ -141,59 +158,123 @@ func (s *Store) mutate(taskID string, fn func(record *Record, now time.Time)) er
 	return s.saveLocked()
 }
 
-func (s *Store) findOrCreateLocked(taskID string) *Record {
+func (s *Store) mutateExisting(taskID string, fn func(record *Record, now time.Time)) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.findLocked(taskID)
+	if !ok {
+		return nil
+	}
+
+	fn(record, time.Now())
+	return s.saveLocked()
+}
+
+func (s *Store) findLocked(taskID string) (*Record, bool) {
 	for index := range s.state.Records {
 		if s.state.Records[index].TaskID == taskID {
-			return &s.state.Records[index]
+			return &s.state.Records[index], true
 		}
+	}
+	return nil, false
+}
+
+func (s *Store) findOrCreateLocked(taskID string) *Record {
+	if record, ok := s.findLocked(taskID); ok {
+		return record
 	}
 	s.state.Records = append(s.state.Records, Record{TaskID: taskID})
 	return &s.state.Records[len(s.state.Records)-1]
 }
 
 func (s *Store) load() (stateFile, error) {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
-		return stateFile{}, fmt.Errorf("create claude state dir: %w", err)
-	}
-
-	data, err := os.ReadFile(s.path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return stateFile{Version: 1}, nil
-		}
-		return stateFile{}, fmt.Errorf("read claude state: %w", err)
-	}
-	if len(data) == 0 {
+	if s.db == nil {
 		return stateFile{Version: 1}, nil
 	}
 
-	var state stateFile
-	if err := json.Unmarshal(data, &state); err != nil {
-		return stateFile{}, fmt.Errorf("decode claude state: %w", err)
+	rows, err := s.db.Query(`
+		SELECT task_id, session_id, prompt, working_directory, status, last_summary, last_assistant_text, result, error, created_at, updated_at
+		FROM claude_records
+	`)
+	if err != nil {
+		return stateFile{}, fmt.Errorf("query claude records: %w", err)
 	}
-	if state.Version == 0 {
-		state.Version = 1
+	defer rows.Close()
+
+	state := stateFile{Version: 1}
+	for rows.Next() {
+		var record Record
+		var createdAt, updatedAt int64
+		if err := rows.Scan(
+			&record.TaskID,
+			&record.SessionID,
+			&record.Prompt,
+			&record.WorkingDirectory,
+			&record.Status,
+			&record.LastSummary,
+			&record.LastAssistantText,
+			&record.Result,
+			&record.Error,
+			&createdAt,
+			&updatedAt,
+		); err != nil {
+			return stateFile{}, fmt.Errorf("scan claude record: %w", err)
+		}
+		record.CreatedAt = storage.TimeFromUnixMillis(createdAt)
+		record.UpdatedAt = storage.TimeFromUnixMillis(updatedAt)
+		state.Records = append(state.Records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return stateFile{}, fmt.Errorf("iterate claude records: %w", err)
 	}
 	return state, nil
 }
 
 func (s *Store) saveLocked() error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
-		return fmt.Errorf("create claude state dir: %w", err)
+	if s.db == nil {
+		return nil
 	}
 
-	s.state.Version = 1
-	data, err := json.MarshalIndent(s.state, "", "  ")
+	tx, err := s.db.Begin()
 	if err != nil {
-		return fmt.Errorf("encode claude state: %w", err)
+		return fmt.Errorf("begin claude save: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM claude_records`); err != nil {
+		return fmt.Errorf("clear claude records: %w", err)
 	}
 
-	tmpPath := s.path + ".tmp"
-	if err := os.WriteFile(tmpPath, append(data, '\n'), 0o644); err != nil {
-		return fmt.Errorf("write claude temp state: %w", err)
+	stmt, err := tx.Prepare(`
+		INSERT INTO claude_records (task_id, session_id, prompt, working_directory, status, last_summary, last_assistant_text, result, error, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare claude insert: %w", err)
 	}
-	if err := os.Rename(tmpPath, s.path); err != nil {
-		return fmt.Errorf("replace claude state: %w", err)
+	defer stmt.Close()
+
+	for _, record := range s.state.Records {
+		if _, err := stmt.Exec(
+			record.TaskID,
+			record.SessionID,
+			record.Prompt,
+			record.WorkingDirectory,
+			string(record.Status),
+			record.LastSummary,
+			record.LastAssistantText,
+			record.Result,
+			record.Error,
+			storage.UnixMillis(record.CreatedAt),
+			storage.UnixMillis(record.UpdatedAt),
+		); err != nil {
+			return fmt.Errorf("insert claude record %q: %w", record.TaskID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit claude save: %w", err)
 	}
 	return nil
 }

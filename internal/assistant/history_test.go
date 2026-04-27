@@ -69,7 +69,7 @@ func TestHistoryStoreSnapshotAllKeepsActiveAndSorts(t *testing.T) {
 func TestHistoryStorePersistsConversation(t *testing.T) {
 	t.Parallel()
 
-	path := t.TempDir() + "/conversations.json"
+	path := "sqlite://" + t.TempDir() + "/agent.db"
 	start := time.Now()
 	session := historyTestSession{id: "session-persist"}
 
@@ -90,5 +90,35 @@ func TestHistoryStorePersistsConversation(t *testing.T) {
 	}
 	if history[0].Content != "你好" || history[1].Content != "你好呀" {
 		t.Fatalf("history = %#v", history)
+	}
+}
+
+func TestHistoryStoreResetClearsPersistence(t *testing.T) {
+	t.Parallel()
+
+	path := "sqlite://" + t.TempDir() + "/agent.db"
+	start := time.Now()
+	session := historyTestSession{id: "session-reset"}
+
+	store, err := newHistoryStore(5*time.Minute, path)
+	if err != nil {
+		t.Fatalf("newHistoryStore() error = %v", err)
+	}
+	store.AppendTurn(session, start, "你好", "你好呀")
+
+	if err := store.Reset(); err != nil {
+		t.Fatalf("Reset() error = %v", err)
+	}
+
+	if snapshots := store.SnapshotAll(start.Add(time.Minute)); len(snapshots) != 0 {
+		t.Fatalf("len(snapshots) = %d, want 0", len(snapshots))
+	}
+
+	reloaded, err := newHistoryStore(5*time.Minute, path)
+	if err != nil {
+		t.Fatalf("reload newHistoryStore() error = %v", err)
+	}
+	if snapshots := reloaded.SnapshotAll(start.Add(time.Minute)); len(snapshots) != 0 {
+		t.Fatalf("len(reloaded snapshots) = %d, want 0", len(snapshots))
 	}
 }

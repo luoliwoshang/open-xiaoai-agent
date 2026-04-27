@@ -13,7 +13,7 @@ func TestManagerSubmitCompletesAndReports(t *testing.T) {
 	t.Helper()
 
 	dir := t.TempDir()
-	manager, err := NewManager(dir + "/tasks.json")
+	manager, err := NewManager("sqlite://" + dir + "/agent.db")
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
@@ -70,7 +70,7 @@ func TestManagerCancelLatest(t *testing.T) {
 	t.Helper()
 
 	dir := t.TempDir()
-	manager, err := NewManager(dir + "/tasks.json")
+	manager, err := NewManager("sqlite://" + dir + "/agent.db")
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
@@ -122,7 +122,7 @@ func TestManagerCancelLatest(t *testing.T) {
 func TestCompletedTasksForIntentIncludesPluginSummary(t *testing.T) {
 	t.Helper()
 
-	manager, err := NewManager(t.TempDir() + "/tasks.json")
+	manager, err := NewManager("sqlite://" + t.TempDir() + "/agent.db")
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
@@ -150,7 +150,7 @@ func TestCompletedTasksForIntentIncludesPluginSummary(t *testing.T) {
 func TestSnapshotFiltersClaudeOutputEvents(t *testing.T) {
 	t.Helper()
 
-	manager, err := NewManager(t.TempDir() + "/tasks.json")
+	manager, err := NewManager("sqlite://" + t.TempDir() + "/agent.db")
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
@@ -185,7 +185,7 @@ func TestSnapshotFiltersClaudeOutputEvents(t *testing.T) {
 func TestSummarizeProgressIncludesStateAndSummary(t *testing.T) {
 	t.Helper()
 
-	manager, err := NewManager(t.TempDir() + "/tasks.json")
+	manager, err := NewManager("sqlite://" + t.TempDir() + "/agent.db")
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
@@ -205,6 +205,45 @@ func TestSummarizeProgressIncludesStateAndSummary(t *testing.T) {
 	text := manager.SummarizeProgress(3)
 	if !strings.Contains(text, "任务：做网页，任务状态：进行中，任务目前阶段summary：Claude 正在生成页面结构") {
 		t.Fatalf("text = %q", text)
+	}
+}
+
+func TestManagerResetClearsTasksAndEvents(t *testing.T) {
+	t.Helper()
+
+	manager, err := NewManager("sqlite://" + t.TempDir() + "/agent.db")
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	task, err := manager.Submit(plugin.AsyncTask{
+		Plugin: "complex_task",
+		Kind:   "complex_task",
+		Title:  "清理测试",
+		Input:  "清理测试",
+		Run: func(ctx context.Context, reporter plugin.AsyncReporter) (string, error) {
+			if err := reporter.Update("正在执行"); err != nil {
+				return "", err
+			}
+			<-ctx.Done()
+			return "", ctx.Err()
+		},
+	})
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	waitForTaskState(t, manager, task.ID, StateRunning)
+
+	if err := manager.Reset(); err != nil {
+		t.Fatalf("Reset() error = %v", err)
+	}
+
+	tasksList, events := manager.Snapshot()
+	if len(tasksList) != 0 {
+		t.Fatalf("len(tasksList) = %d, want 0", len(tasksList))
+	}
+	if len(events) != 0 {
+		t.Fatalf("len(events) = %d, want 0", len(events))
 	}
 }
 

@@ -30,7 +30,7 @@ Current non-goals / known missing pieces:
 - no real IM gateway yet
 - no proper voice interruption detection
 - some latency optimizations were intentionally not carried over from earlier experiments
-- persistence is JSON-file based, not SQLite / Redis / MQ
+- persistence is MySQL-backed, not SQLite / Redis / MQ
 
 ## Tech Stack
 
@@ -78,7 +78,7 @@ Only the high-signal parts are listed here.
   - actual builtin tools
   - each plugin lives in its own subdirectory
 - `internal/tasks`
-  - JSON-backed task store and manager
+  - MySQL-backed task store and manager
 - `internal/server`
   - WebSocket server / session / RPC protocol
 - `internal/speaker`
@@ -94,6 +94,7 @@ Only the high-signal parts are listed here.
 Run both backend and frontend:
 
 ```sh
+export OPEN_XIAOAI_AGENT_DSN='user:pass@tcp(127.0.0.1:3306)/open_xiaoai_agent'
 npm install
 npm run dev
 ```
@@ -118,12 +119,9 @@ Common backend flags from `main.go`:
   - default `:4399`
 - `-dashboard-addr`
   - default `:8090`
-- `-tasks-file`
-  - default `data/tasks.json`
-- `-conversations-file`
-  - default `data/conversations.json`
-- `-claude-state-file`
-  - default `data/plugins/claude_code.json`
+- `-db-dsn`
+  - runtime database DSN
+  - if omitted, the process falls back to env var `OPEN_XIAOAI_AGENT_DSN`
 - `-claude-cwd`
   - working directory for Claude CLI tasks
 - `-debug`
@@ -158,33 +156,28 @@ Important:
 
 ## Persistent State
 
-This project currently uses JSON file persistence.
+This project currently uses MySQL persistence.
 
-Files:
+Logical stores:
 
-- `data/tasks.json`
-  - async task records + task events
-- `data/conversations.json`
-  - 5-minute conversation history windows
-- `data/plugins/claude_code.json`
-  - Claude plugin private state
-
-These are intentionally ignored in `.gitignore`.
+- generic async task records + task events
+- 5-minute conversation history windows
+- Claude plugin private state
 
 ### Meaning of Each Store
 
-`tasks.json`:
+Generic task store:
 
 - generic task table
 - generic task events
 - does not store plugin-specific execution internals such as Claude session ids
 
-`conversations.json`:
+Conversation store:
 
 - persistent conversation windows used by `intent` and `reply`
 - conversation windows are still logically 5-minute windows
 
-`data/plugins/claude_code.json`:
+Claude-private store:
 
 - plugin-private storage
 - maps the project task id to Claude-specific state such as:
@@ -198,6 +191,10 @@ This separation is intentional:
 
 - main task storage remains generic
 - plugin-specific continuation state stays inside the plugin
+
+The current dashboard API also provides a reset endpoint that clears runtime state:
+
+- `POST /api/reset`
 
 ## Conversation Model
 
@@ -357,7 +354,7 @@ Implemented behavior:
 - captures `system/init` for `session_id`
 - captures assistant text
 - captures final result
-- stores Claude-private state in `data/plugins/claude_code.json`
+- stores Claude-private state in the Claude-private MySQL store
 
 Prompt shaping rules currently enforced for new Claude tasks:
 
@@ -411,6 +408,7 @@ Important routes:
 
 - `GET /api/healthz`
 - `GET /api/state`
+- `POST /api/reset`
 
 The frontend is separate and should stay that way.
 
@@ -482,7 +480,7 @@ Desired boundary:
 
 - Do not re-couple this repo back to the `open-xiaoai` source tree.
 - Do not store executor-private state in the generic task table.
-- Do not commit `config.yaml` or runtime data JSON files.
+- Do not commit `config.yaml` or real database credentials.
 - Prefer updating `AGENTS.md` when a meaningful architectural decision changes.
 - Keep plugin code isolated by plugin directory.
 - Keep README user-facing; put heavy dev context here instead.

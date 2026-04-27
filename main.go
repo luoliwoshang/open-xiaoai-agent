@@ -26,9 +26,7 @@ import (
 func main() {
 	addr := flag.String("addr", ":4399", "websocket listen address")
 	dashboardAddr := flag.String("dashboard-addr", ":8090", "dashboard listen address")
-	tasksFile := flag.String("tasks-file", "data/tasks.json", "async task store path")
-	conversationsFile := flag.String("conversations-file", "data/conversations.json", "conversation history store path")
-	claudeStateFile := flag.String("claude-state-file", "data/plugins/claude_code.json", "claude plugin state store path")
+	dbDSN := flag.String("db-dsn", "", "runtime database DSN, expected to be a MySQL DSN such as user:pass@tcp(127.0.0.1:3306)/open_xiaoai_agent")
 	claudeCwd := flag.String("claude-cwd", "", "working directory for claude complex tasks")
 	debug := flag.Bool("debug", false, "print raw events for debugging")
 	abortAfterASR := flag.Bool("abort-after-asr", true, "abort original XiaoAI immediately before intent stage")
@@ -40,16 +38,24 @@ func main() {
 		Addr:  *addr,
 		Debug: *debug,
 	}
+	dsn := strings.TrimSpace(*dbDSN)
+	if dsn == "" {
+		dsn = strings.TrimSpace(os.Getenv("OPEN_XIAOAI_AGENT_DSN"))
+	}
+
 	appConfig, err := config.Load(".")
 	if err != nil {
 		log.Fatal(err)
+	}
+	if dsn == "" {
+		log.Fatal("db-dsn is required, or set OPEN_XIAOAI_AGENT_DSN")
 	}
 	log.Printf("loaded SOUL.md (%d chars)", len(appConfig.Soul))
 	log.Printf("loaded models: intent=%s reply=%s", appConfig.Intent.Model, appConfig.Reply.Model)
 	llmClient := llm.NewClient()
 	spk := speaker.New()
 	weatherClient := amap.NewClient(appConfig.AMap.APIKey)
-	taskManager, err := tasks.NewManager(*tasksFile)
+	taskManager, err := tasks.NewManager(dsn)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -57,7 +63,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	claudeStore, err := complextask.NewStore(*claudeStateFile)
+	claudeStore, err := complextask.NewStore(dsn)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -74,7 +80,7 @@ func main() {
 			PostAbortDelay:        *postAbortDelay,
 			SessionWindow:         5 * time.Minute,
 			UseParallelIntentChat: *useParallelIntentChat,
-			ConversationsFile:     *conversationsFile,
+			StateDSN:              dsn,
 		},
 		llm.NewIntentRecognizer(llmClient, appConfig.Intent, plugins, taskManager),
 		llm.NewReplyGenerator(llmClient, appConfig.Reply, appConfig.Soul),

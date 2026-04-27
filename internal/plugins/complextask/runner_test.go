@@ -31,7 +31,7 @@ func (f *fakeReporter) Event(eventType string, message string) error {
 func TestStreamParserHandlesClaudeOutput(t *testing.T) {
 	t.Parallel()
 
-	store, err := NewStore(t.TempDir() + "/claude.json")
+	store, err := NewStore("sqlite://" + t.TempDir() + "/agent.db")
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}

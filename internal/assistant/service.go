@@ -45,7 +45,7 @@ type Config struct {
 	PostAbortDelay        time.Duration
 	SessionWindow         time.Duration
 	UseParallelIntentChat bool
-	ConversationsFile     string
+	StateDSN              string
 }
 
 type Service struct {
@@ -65,7 +65,7 @@ func New(config Config, intent IntentDecider, reply ReplyStreamer, tools ToolRun
 	if config.PostAbortDelay < 0 {
 		config.PostAbortDelay = 0
 	}
-	history, err := newHistoryStore(config.SessionWindow, config.ConversationsFile)
+	history, err := newHistoryStore(config.SessionWindow, config.StateDSN)
 	if err != nil {
 		return nil, err
 	}
@@ -85,6 +85,13 @@ func (s *Service) SnapshotConversations() []ConversationSnapshot {
 		return nil
 	}
 	return s.history.SnapshotAll(time.Now())
+}
+
+func (s *Service) ResetConversationData() error {
+	if s == nil || s.history == nil {
+		return nil
+	}
+	return s.history.Reset()
 }
 
 func (s *Service) OnASR(session *server.Session, text string) {
