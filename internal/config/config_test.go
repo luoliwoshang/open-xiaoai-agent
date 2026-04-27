@@ -15,6 +15,8 @@ func TestLoad(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "SOUL.md"), "# 角色\n你是一个有边界感的语音助手。")
 	writeFile(t, filepath.Join(dir, "config.yaml"), `
+database:
+  dsn: user:pass@tcp(127.0.0.1:3306)/open_xiaoai_agent
 openai:
   base_url: https://api.openai.com/v1
 amap:
@@ -36,6 +38,9 @@ reply:
 
 	if cfg.OpenAI.BaseURL != "https://api.openai.com/v1" {
 		t.Fatalf("openai.base_url = %q", cfg.OpenAI.BaseURL)
+	}
+	if cfg.Database.DSN != "user:pass@tcp(127.0.0.1:3306)/open_xiaoai_agent" {
+		t.Fatalf("database.dsn = %q", cfg.Database.DSN)
 	}
 	if cfg.AMap.APIKey != "amap-key" {
 		t.Fatalf("amap.api_key = %q", cfg.AMap.APIKey)
@@ -63,6 +68,8 @@ func TestLoad_AllowsEmptyAMapKey(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "SOUL.md"), "# 角色\n你是一个有边界感的语音助手。")
 	writeFile(t, filepath.Join(dir, "config.yaml"), `
+database:
+  dsn: user:pass@tcp(127.0.0.1:3306)/open_xiaoai_agent
 openai:
   base_url: https://api.openai.com/v1
 amap:
@@ -90,6 +97,8 @@ func TestLoad_DefaultsModelBaseURLFromOpenAI(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "SOUL.md"), "# 角色\n你是一个有边界感的语音助手。")
 	writeFile(t, filepath.Join(dir, "config.yaml"), `
+database:
+  dsn: user:pass@tcp(127.0.0.1:3306)/open_xiaoai_agent
 openai:
   base_url: https://api.openai.com/v1
 intent:
@@ -113,12 +122,61 @@ reply:
 	}
 }
 
+func TestLoad_TrimsDatabaseDSN(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "SOUL.md"), "# 角色\n你是一个有边界感的语音助手。")
+	writeFile(t, filepath.Join(dir, "config.yaml"), `
+database:
+  dsn: "  user:pass@tcp(127.0.0.1:3306)/open_xiaoai_agent  "
+openai:
+  base_url: https://api.openai.com/v1
+intent:
+  model: gpt-4.1-mini
+  api_key: intent-key
+reply:
+  model: gpt-4.1
+  api_key: reply-key
+`)
+
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Database.DSN != "user:pass@tcp(127.0.0.1:3306)/open_xiaoai_agent" {
+		t.Fatalf("database.dsn = %q", cfg.Database.DSN)
+	}
+}
+
 func TestLoad_RejectsEmptySoul(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "SOUL.md"), "   \n")
-	writeFile(t, filepath.Join(dir, "config.yaml"), "openai:\n  base_url: https://api.openai.com/v1\n")
+	writeFile(t, filepath.Join(dir, "config.yaml"), "database:\n  dsn: user:pass@tcp(127.0.0.1:3306)/open_xiaoai_agent\nopenai:\n  base_url: https://api.openai.com/v1\n")
+
+	_, err := config.Load(dir)
+	if err == nil {
+		t.Fatal("Load() error = nil, want non-nil")
+	}
+}
+
+func TestLoad_RejectsMissingDatabaseDSN(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "SOUL.md"), "# 角色\n你是一个有边界感的语音助手。")
+	writeFile(t, filepath.Join(dir, "config.yaml"), `
+openai:
+  base_url: https://api.openai.com/v1
+intent:
+  model: gpt-4.1-mini
+  api_key: intent-key
+reply:
+  model: gpt-4.1
+  api_key: reply-key
+`)
 
 	_, err := config.Load(dir)
 	if err == nil {
@@ -132,6 +190,8 @@ func TestLoad_RejectsMissingModelConfig(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "SOUL.md"), "# 角色\n你是一个有边界感的语音助手。")
 	writeFile(t, filepath.Join(dir, "config.yaml"), `
+database:
+  dsn: user:pass@tcp(127.0.0.1:3306)/open_xiaoai_agent
 openai:
   base_url: https://api.openai.com/v1
 intent:
