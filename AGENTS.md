@@ -23,11 +23,14 @@ Current responsibilities:
 - run `reply` generation for normal chat and tool-result summarization
 - drive local TTS playback on the device through the existing client protocol
 - maintain lightweight async tasks
+- provide phase-1 IM gateway capability for WeChat text delivery
 - expose a React dashboard over API + web frontend
 
 Current non-goals / known missing pieces:
 
-- no real IM gateway yet
+- no IM inbound conversation handling yet
+- no media delivery in IM gateway yet
+- no group routing in IM gateway yet
 - no proper voice interruption detection
 - some latency optimizations were intentionally not carried over from earlier experiments
 - persistence is MySQL-backed, not SQLite / Redis / MQ
@@ -86,6 +89,9 @@ Only the high-signal parts are listed here.
   - single text playback + streamed chunk playback
 - `internal/dashboard`
   - API side for dashboard state
+- `internal/im`
+  - phase-1 IM gateway
+  - WeChat login / account / target / mirror delivery
 - `web/`
   - React dashboard
 
@@ -164,6 +170,7 @@ Logical stores:
 - sliding-window conversation history
 - Claude plugin private state
 - runtime settings such as `session.window_seconds`
+- IM gateway accounts / targets / events
 
 ### Meaning of Each Store
 
@@ -181,8 +188,21 @@ Conversation store:
 Runtime settings store:
 
 - small key/value runtime settings persisted in MySQL
-- currently used for `session.window_seconds`
+- currently used for:
+  - `session.window_seconds`
+  - `im.delivery.enabled`
+  - `im.delivery.selected_account_id`
+  - `im.delivery.selected_target_id`
 - service startup is expected to ensure default settings rows exist
+
+IM gateway store:
+
+- phase-1 WeChat gateway state persisted in MySQL
+- includes:
+  - logged-in IM accounts
+  - default text delivery targets
+  - recent IM gateway events
+- current scope is outbound text delivery only
 
 Claude-private store:
 
@@ -418,6 +438,13 @@ Important routes:
 - `GET /api/state`
 - `GET /api/settings`
 - `POST /api/settings/session`
+- `POST /api/settings/im-delivery`
+- `POST /api/im/wechat/login/start`
+- `GET /api/im/wechat/login/status`
+- `POST /api/im/targets`
+- `POST /api/im/targets/default`
+- `POST /api/im/targets/delete`
+- `POST /api/im/accounts/delete`
 - `POST /api/reset`
 
 The frontend is separate and should stay that way.
@@ -427,6 +454,7 @@ UI decisions that were explicitly requested:
 - conversation history should not be visually mixed with task event flow
 - task event flow belongs to a selected task
 - conversation history is shown separately
+- settings should live on a separate settings page
 - dashboard should feel intentional, not generic admin boilerplate
 
 ## Testing
@@ -474,7 +502,7 @@ Avoid dumping deep internal directory explanations into README.
 
 The major planned architectural direction already discussed:
 
-- introduce an independent `IM Gateway`
+- continue expanding the independent `IM Gateway`
 - support channels such as WeChat / QQ
 - keep IM integration outside OpenClaw
 - treat OpenClaw / Claude / future executors as pluggable workers, not channel adapters

@@ -78,6 +78,8 @@ flowchart TD
 - 提供独立的 React + Vite dashboard
 - 使用 MySQL 保存任务、会话和插件私有状态
 - 会话上下文默认使用滑动窗口，并支持在 Dashboard 中调整窗口秒数
+- 提供第一期独立 IM Gateway：支持微信扫码登录、多账号管理、文本触达配置
+- 支持把小爱的正常回复异步镜像到选中的微信私聊目标，不阻塞设备侧播报
 
 当前内置工具：
 
@@ -167,7 +169,8 @@ npm run dev
 
 - WebSocket server: `:4399`
 - Dashboard API: `:8090`
-- Web dashboard: `http://127.0.0.1:5173`
+- Web dashboard: `http://127.0.0.1:5173/#/`
+- Settings page: `http://127.0.0.1:5173/#/settings`
 
 如果只启动后端：
 
@@ -233,6 +236,10 @@ Go 后端只提供 API，前端位于 `web/`。
 - `GET /api/state`
 - `GET /api/settings`
 - `POST /api/settings/session`
+- `POST /api/settings/im-delivery`
+- `POST /api/im/wechat/login/start`
+- `GET /api/im/wechat/login/status`
+- `POST /api/im/targets`
 - `POST /api/reset`
 
 ## 验证
@@ -244,14 +251,17 @@ npm run build:web
 
 ## 当前限制
 
-- 还没有独立的 IM Gateway
+- 当前 IM Gateway 第一期只做微信文本触达
+- 还没有 IM 入站会话
+- 还没有媒体发送
+- 还没有群聊路由
 - 还没有完善的人声打断检测
 - 当前依赖外部 MySQL 服务
 - 一些更激进的延迟优化还没有迁移到这个独立仓库
 
 ## 规划
 
-- 增加独立 IM Gateway，用于接入微信、QQ 等渠道
+- 在现有微信文本触达基础上继续完善 IM Gateway，并逐步扩展到更多渠道
 - 保持 Claude / OpenClaw / 其他执行器可插拔
 - 在不改变设备桥接边界的前提下继续增强任务与上下文能力
 

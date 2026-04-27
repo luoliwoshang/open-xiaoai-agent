@@ -3,6 +3,7 @@ package settings
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,7 +18,16 @@ const (
 )
 
 type Snapshot struct {
-	SessionWindowSeconds int `json:"session_window_seconds"`
+	SessionWindowSeconds int    `json:"session_window_seconds"`
+	IMDeliveryEnabled    bool   `json:"im_delivery_enabled"`
+	IMSelectedAccountID  string `json:"im_selected_account_id"`
+	IMSelectedTargetID   string `json:"im_selected_target_id"`
+}
+
+type IMDeliveryConfig struct {
+	Enabled           bool
+	SelectedAccountID string
+	SelectedTargetID  string
 }
 
 type Store struct {
@@ -56,6 +66,15 @@ func (s *Store) SessionWindow() time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
+func (s *Store) DeliveryConfig() IMDeliveryConfig {
+	snapshot := s.Snapshot()
+	return IMDeliveryConfig{
+		Enabled:           snapshot.IMDeliveryEnabled,
+		SelectedAccountID: snapshot.IMSelectedAccountID,
+		SelectedTargetID:  snapshot.IMSelectedTargetID,
+	}
+}
+
 func (s *Store) UpdateSessionWindowSeconds(seconds int) (Snapshot, error) {
 	if err := ValidateSessionWindowSeconds(seconds); err != nil {
 		return Snapshot{}, err
@@ -83,6 +102,59 @@ func (s *Store) UpdateSessionWindowSeconds(seconds int) (Snapshot, error) {
 	return snapshot, nil
 }
 
+func (s *Store) UpdateIMDelivery(enabled bool, accountID string, targetID string) (Snapshot, error) {
+	accountID = strings.TrimSpace(accountID)
+	targetID = strings.TrimSpace(targetID)
+	if err := ValidateIMDelivery(enabled, accountID, targetID); err != nil {
+		return Snapshot{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	next := s.snapshot
+	next.IMDeliveryEnabled = enabled
+	next.IMSelectedAccountID = accountID
+	next.IMSelectedTargetID = targetID
+
+	if s.db == nil {
+		s.snapshot = next
+		return next, nil
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("begin update im delivery: %w", err)
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UnixMilli()
+	updates := []struct {
+		key   string
+		value string
+	}{
+		{key: storage.IMDeliveryEnabledSettingKey, value: boolToSettingValue(enabled)},
+		{key: storage.IMSelectedAccountSettingKey, value: accountID},
+		{key: storage.IMSelectedTargetSettingKey, value: targetID},
+	}
+	for _, item := range updates {
+		if _, err := tx.Exec(
+			`UPDATE settings SET value = ?, updated_at = ? WHERE setting_key = ?`,
+			item.value,
+			now,
+			item.key,
+		); err != nil {
+			return Snapshot{}, fmt.Errorf("update setting %q: %w", item.key, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return Snapshot{}, fmt.Errorf("commit update im delivery: %w", err)
+	}
+
+	s.snapshot = next
+	return next, nil
+}
+
 func ValidateSessionWindowSeconds(seconds int) error {
 	switch {
 	case seconds < MinSessionWindowSeconds:
@@ -94,43 +166,136 @@ func ValidateSessionWindowSeconds(seconds int) error {
 	}
 }
 
+func ValidateIMDelivery(enabled bool, accountID string, targetID string) error {
+	if !enabled {
+		return nil
+	}
+	if strings.TrimSpace(accountID) == "" {
+		return fmt.Errorf("im selected account id is required when delivery is enabled")
+	}
+	if strings.TrimSpace(targetID) == "" {
+		return fmt.Errorf("im selected target id is required when delivery is enabled")
+	}
+	return nil
+}
+
 func (s *Store) load() (Snapshot, error) {
 	if s.db == nil {
-		return Snapshot{SessionWindowSeconds: storage.DefaultSessionWindowSeconds}, nil
+		return Snapshot{
+			SessionWindowSeconds: storage.DefaultSessionWindowSeconds,
+			IMDeliveryEnabled:    false,
+		}, nil
 	}
 
-	var raw string
-	err := s.db.QueryRow(
-		`SELECT value FROM settings WHERE setting_key = ?`,
-		storage.SessionWindowSecondsSettingKey,
-	).Scan(&raw)
+	rawSessionWindow, err := s.readSettingValue(storage.SessionWindowSecondsSettingKey)
 	if err == sql.ErrNoRows {
 		return s.repairDefault()
 	}
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("load session window seconds: %w", err)
 	}
-
-	seconds, err := strconv.Atoi(strings.TrimSpace(raw))
+	sessionWindowSeconds, err := strconv.Atoi(strings.TrimSpace(rawSessionWindow))
 	if err != nil {
-		return Snapshot{}, fmt.Errorf("parse session window seconds %q: %w", raw, err)
+		return Snapshot{}, fmt.Errorf("parse session window seconds %q: %w", rawSessionWindow, err)
 	}
-	if err := ValidateSessionWindowSeconds(seconds); err != nil {
+	if err := ValidateSessionWindowSeconds(sessionWindowSeconds); err != nil {
 		return Snapshot{}, err
 	}
 
-	return Snapshot{SessionWindowSeconds: seconds}, nil
+	rawIMEnabled, err := s.readSettingValue(storage.IMDeliveryEnabledSettingKey)
+	if err == sql.ErrNoRows {
+		return s.repairDefault()
+	}
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("load im delivery enabled: %w", err)
+	}
+	imDeliveryEnabled, err := parseBoolSetting(rawIMEnabled)
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("parse im delivery enabled %q: %w", rawIMEnabled, err)
+	}
+
+	selectedAccountID, err := s.readSettingValue(storage.IMSelectedAccountSettingKey)
+	if err == sql.ErrNoRows {
+		return s.repairDefault()
+	}
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("load im selected account id: %w", err)
+	}
+
+	selectedTargetID, err := s.readSettingValue(storage.IMSelectedTargetSettingKey)
+	if err == sql.ErrNoRows {
+		return s.repairDefault()
+	}
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("load im selected target id: %w", err)
+	}
+
+	selectedAccountID = strings.TrimSpace(selectedAccountID)
+	selectedTargetID = strings.TrimSpace(selectedTargetID)
+	if err := ValidateIMDelivery(imDeliveryEnabled, selectedAccountID, selectedTargetID); err != nil {
+		log.Printf("settings: invalid im delivery config found in database, falling back to disabled delivery: %v", err)
+		imDeliveryEnabled = false
+		selectedAccountID = ""
+		selectedTargetID = ""
+	}
+
+	return Snapshot{
+		SessionWindowSeconds: sessionWindowSeconds,
+		IMDeliveryEnabled:    imDeliveryEnabled,
+		IMSelectedAccountID:  selectedAccountID,
+		IMSelectedTargetID:   selectedTargetID,
+	}, nil
 }
 
 func (s *Store) repairDefault() (Snapshot, error) {
-	snapshot := Snapshot{SessionWindowSeconds: storage.DefaultSessionWindowSeconds}
-	if _, err := s.db.Exec(
-		`INSERT INTO settings (setting_key, value, updated_at) VALUES (?, ?, ?)`,
-		storage.SessionWindowSecondsSettingKey,
-		strconv.Itoa(snapshot.SessionWindowSeconds),
-		time.Now().UnixMilli(),
-	); err != nil {
-		return Snapshot{}, fmt.Errorf("insert default session window seconds: %w", err)
+	snapshot := Snapshot{
+		SessionWindowSeconds: storage.DefaultSessionWindowSeconds,
+		IMDeliveryEnabled:    false,
+		IMSelectedAccountID:  "",
+		IMSelectedTargetID:   "",
+	}
+	values := []struct {
+		key   string
+		value string
+	}{
+		{key: storage.SessionWindowSecondsSettingKey, value: strconv.Itoa(snapshot.SessionWindowSeconds)},
+		{key: storage.IMDeliveryEnabledSettingKey, value: boolToSettingValue(snapshot.IMDeliveryEnabled)},
+		{key: storage.IMSelectedAccountSettingKey, value: snapshot.IMSelectedAccountID},
+		{key: storage.IMSelectedTargetSettingKey, value: snapshot.IMSelectedTargetID},
+	}
+	for _, item := range values {
+		if _, err := s.db.Exec(
+			`INSERT INTO settings (setting_key, value, updated_at) VALUES (?, ?, ?)`,
+			item.key,
+			item.value,
+			time.Now().UnixMilli(),
+		); err != nil {
+			return Snapshot{}, fmt.Errorf("insert default setting %q: %w", item.key, err)
+		}
 	}
 	return snapshot, nil
+}
+
+func (s *Store) readSettingValue(key string) (string, error) {
+	var raw string
+	err := s.db.QueryRow(`SELECT value FROM settings WHERE setting_key = ?`, key).Scan(&raw)
+	return raw, err
+}
+
+func boolToSettingValue(value bool) string {
+	if value {
+		return "1"
+	}
+	return "0"
+}
+
+func parseBoolSetting(value string) (bool, error) {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "1", "true", "yes", "on":
+		return true, nil
+	case "0", "false", "no", "off", "":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid boolean value")
+	}
 }

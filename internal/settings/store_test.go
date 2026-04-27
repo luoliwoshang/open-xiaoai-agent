@@ -62,3 +62,57 @@ func TestStoreRejectsInvalidSessionWindowSeconds(t *testing.T) {
 		}
 	}
 }
+
+func TestStoreUpdateIMDelivery(t *testing.T) {
+	t.Parallel()
+
+	dsn := "sqlite://" + t.TempDir() + "/agent.db"
+	store, err := NewStore(dsn)
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+
+	snapshot, err := store.UpdateIMDelivery(true, "account_1", "target_1")
+	if err != nil {
+		t.Fatalf("UpdateIMDelivery() error = %v", err)
+	}
+	if !snapshot.IMDeliveryEnabled {
+		t.Fatal("IMDeliveryEnabled = false, want true")
+	}
+	if snapshot.IMSelectedAccountID != "account_1" {
+		t.Fatalf("IMSelectedAccountID = %q, want %q", snapshot.IMSelectedAccountID, "account_1")
+	}
+	if snapshot.IMSelectedTargetID != "target_1" {
+		t.Fatalf("IMSelectedTargetID = %q, want %q", snapshot.IMSelectedTargetID, "target_1")
+	}
+
+	reloaded, err := NewStore(dsn)
+	if err != nil {
+		t.Fatalf("reload NewStore() error = %v", err)
+	}
+	if !reloaded.Snapshot().IMDeliveryEnabled {
+		t.Fatal("reloaded IMDeliveryEnabled = false, want true")
+	}
+	if reloaded.Snapshot().IMSelectedAccountID != "account_1" {
+		t.Fatalf("reloaded IMSelectedAccountID = %q, want %q", reloaded.Snapshot().IMSelectedAccountID, "account_1")
+	}
+	if reloaded.Snapshot().IMSelectedTargetID != "target_1" {
+		t.Fatalf("reloaded IMSelectedTargetID = %q, want %q", reloaded.Snapshot().IMSelectedTargetID, "target_1")
+	}
+}
+
+func TestStoreRejectsInvalidIMDeliveryWhenEnabled(t *testing.T) {
+	t.Parallel()
+
+	store, err := NewStore("sqlite://" + t.TempDir() + "/agent.db")
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+
+	if _, err := store.UpdateIMDelivery(true, "", "target_1"); err == nil {
+		t.Fatal("UpdateIMDelivery() error = nil, want error for missing account id")
+	}
+	if _, err := store.UpdateIMDelivery(true, "account_1", ""); err == nil {
+		t.Fatal("UpdateIMDelivery() error = nil, want error for missing target id")
+	}
+}

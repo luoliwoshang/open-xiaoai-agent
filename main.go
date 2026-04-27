@@ -11,6 +11,7 @@ import (
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/assistant"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/config"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/dashboard"
+	"github.com/luoliwoshang/open-xiaoai-agent/internal/im"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/llm"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugin"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugins"
@@ -59,6 +60,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	imService, err := im.NewService(dsn, settingsStore)
+	if err != nil {
+		log.Fatal(err)
+	}
 	taskManager, err := tasks.NewManager(dsn)
 	if err != nil {
 		log.Fatal(err)
@@ -90,6 +95,7 @@ func main() {
 		llm.NewReplyGenerator(llmClient, appConfig.Reply, appConfig.Soul),
 		plugins,
 		taskManager,
+		imService,
 		spk,
 	)
 	if err != nil {
@@ -98,7 +104,7 @@ func main() {
 
 	srv := server.New(cfg, asrService.OnASR)
 	go func() {
-		if err := dashboard.New(*dashboardAddr, taskManager, complexTaskService, asrService, settingsStore).ListenAndServe(); err != nil {
+		if err := dashboard.New(*dashboardAddr, taskManager, complexTaskService, asrService, settingsStore, imService).ListenAndServe(); err != nil {
 			log.Printf("dashboard stopped: %v", err)
 		}
 	}()
