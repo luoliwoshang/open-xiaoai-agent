@@ -5,12 +5,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	mysqlcfg "github.com/go-sql-driver/mysql"
 	_ "github.com/mattn/go-sqlite3"
+)
+
+const (
+	SessionWindowSecondsSettingKey = "session.window_seconds"
+	DefaultSessionWindowSeconds    = 300
 )
 
 func OpenRuntimeDB(dsn string) (*sql.DB, error) {
@@ -62,6 +68,9 @@ func openMySQL(rawDSN string) (*sql.DB, error) {
 	}
 	if _, ok := cfg.Params["charset"]; !ok {
 		cfg.Params["charset"] = "utf8mb4"
+	}
+	if err := ensureMySQLDatabase(cfg); err != nil {
+		return nil, err
 	}
 
 	db, err := sql.Open("mysql", cfg.FormatDSN())
@@ -161,6 +170,11 @@ func ensureSchema(db *sql.DB) error {
 			created_at BIGINT NOT NULL,
 			updated_at BIGINT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS settings (
+			setting_key VARCHAR(255) PRIMARY KEY,
+			value VARCHAR(255) NOT NULL,
+			updated_at BIGINT NOT NULL
+		)`,
 	}
 
 	for _, statement := range statements {
@@ -168,5 +182,68 @@ func ensureSchema(db *sql.DB) error {
 			return fmt.Errorf("ensure runtime schema: %w", err)
 		}
 	}
+	if err := ensureDefaultSettings(db); err != nil {
+		return err
+	}
 	return nil
+}
+
+func ensureMySQLDatabase(cfg *mysqlcfg.Config) error {
+	adminCfg := *cfg
+	dbName := strings.TrimSpace(adminCfg.DBName)
+	adminCfg.DBName = ""
+
+	adminDB, err := sql.Open("mysql", adminCfg.FormatDSN())
+	if err != nil {
+		return fmt.Errorf("open mysql admin connection: %w", err)
+	}
+	defer adminDB.Close()
+
+	adminDB.SetConnMaxLifetime(5 * time.Minute)
+	adminDB.SetMaxOpenConns(2)
+	adminDB.SetMaxIdleConns(2)
+
+	if err := adminDB.Ping(); err != nil {
+		return fmt.Errorf("ping mysql admin connection: %w", err)
+	}
+
+	query := fmt.Sprintf(
+		"CREATE DATABASE IF NOT EXISTS %s CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+		quoteMySQLIdentifier(dbName),
+	)
+	if _, err := adminDB.Exec(query); err != nil {
+		return fmt.Errorf("ensure mysql database %q: %w", dbName, err)
+	}
+	return nil
+}
+
+func ensureDefaultSettings(db *sql.DB) error {
+	defaults := map[string]string{
+		SessionWindowSecondsSettingKey: strconv.Itoa(DefaultSessionWindowSeconds),
+	}
+
+	for key, value := range defaults {
+		var exists int
+		err := db.QueryRow(`SELECT 1 FROM settings WHERE setting_key = ? LIMIT 1`, key).Scan(&exists)
+		switch {
+		case err == nil:
+			continue
+		case err != sql.ErrNoRows:
+			return fmt.Errorf("query setting %q: %w", key, err)
+		}
+
+		if _, err := db.Exec(
+			`INSERT INTO settings (setting_key, value, updated_at) VALUES (?, ?, ?)`,
+			key,
+			value,
+			time.Now().UnixMilli(),
+		); err != nil {
+			return fmt.Errorf("insert default setting %q: %w", key, err)
+		}
+	}
+	return nil
+}
+
+func quoteMySQLIdentifier(value string) string {
+	return "`" + strings.ReplaceAll(value, "`", "``") + "`"
 }

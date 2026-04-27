@@ -161,8 +161,9 @@ This project currently uses MySQL persistence.
 Logical stores:
 
 - generic async task records + task events
-- 5-minute conversation history windows
+- sliding-window conversation history
 - Claude plugin private state
+- runtime settings such as `session.window_seconds`
 
 ### Meaning of Each Store
 
@@ -175,7 +176,13 @@ Generic task store:
 Conversation store:
 
 - persistent conversation windows used by `intent` and `reply`
-- conversation windows are still logically 5-minute windows
+- conversation windows are keyed by session and expire by `last_active + session.window_seconds`
+
+Runtime settings store:
+
+- small key/value runtime settings persisted in MySQL
+- currently used for `session.window_seconds`
+- service startup is expected to ensure default settings rows exist
 
 Claude-private store:
 
@@ -202,8 +209,9 @@ Conversation history is persisted and reused.
 
 Current rule:
 
-- a conversation window lasts 5 minutes from the start of the window
-- it is not a sliding “last activity + 5m” window
+- conversation reuse is based on a sliding window
+- a session stays active while `last_active + session.window_seconds` has not expired
+- current default is `300` seconds, and it can be adjusted through the dashboard settings API
 
 What gets written:
 
@@ -408,6 +416,8 @@ Important routes:
 
 - `GET /api/healthz`
 - `GET /api/state`
+- `GET /api/settings`
+- `POST /api/settings/session`
 - `POST /api/reset`
 
 The frontend is separate and should stay that way.
