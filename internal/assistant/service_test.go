@@ -148,7 +148,7 @@ func (m *fakeTaskManager) MarkReported(ids []string) error {
 func newTestService(t *testing.T, config Config, intent IntentDecider, reply ReplyStreamer, tools ToolRunner, taskManager TaskManager, spk *speaker.Speaker) *Service {
 	t.Helper()
 
-	service, err := New(config, staticSessionWindow{window: 5 * time.Minute}, intent, reply, tools, taskManager, spk)
+	service, err := New(config, staticSessionWindow{window: 5 * time.Minute}, intent, reply, tools, taskManager, nil, spk)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}

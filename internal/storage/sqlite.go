@@ -17,6 +17,9 @@ import (
 const (
 	SessionWindowSecondsSettingKey = "session.window_seconds"
 	DefaultSessionWindowSeconds    = 300
+	IMDeliveryEnabledSettingKey    = "im.delivery.enabled"
+	IMSelectedAccountSettingKey    = "im.delivery.selected_account_id"
+	IMSelectedTargetSettingKey     = "im.delivery.selected_target_id"
 )
 
 func OpenRuntimeDB(dsn string) (*sql.DB, error) {
@@ -175,6 +178,37 @@ func ensureSchema(db *sql.DB) error {
 			value VARCHAR(255) NOT NULL,
 			updated_at BIGINT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS im_accounts (
+			id VARCHAR(255) PRIMARY KEY,
+			platform VARCHAR(64) NOT NULL,
+			remote_account_id VARCHAR(255) NOT NULL,
+			owner_user_id VARCHAR(255) NOT NULL DEFAULT '',
+			display_name VARCHAR(255) NOT NULL DEFAULT '',
+			base_url LONGTEXT NOT NULL,
+			token LONGTEXT NOT NULL,
+			last_error LONGTEXT NOT NULL,
+			last_sent_at BIGINT NOT NULL DEFAULT 0,
+			created_at BIGINT NOT NULL,
+			updated_at BIGINT NOT NULL,
+			UNIQUE (platform, remote_account_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS im_targets (
+			id VARCHAR(255) PRIMARY KEY,
+			account_id VARCHAR(255) NOT NULL,
+			name VARCHAR(255) NOT NULL,
+			target_user_id VARCHAR(255) NOT NULL,
+			is_default BOOLEAN NOT NULL DEFAULT FALSE,
+			created_at BIGINT NOT NULL,
+			updated_at BIGINT NOT NULL,
+			UNIQUE (account_id, target_user_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS im_events (
+			id VARCHAR(255) PRIMARY KEY,
+			account_id VARCHAR(255) NOT NULL,
+			type VARCHAR(255) NOT NULL,
+			message LONGTEXT NOT NULL,
+			created_at BIGINT NOT NULL
+		)`,
 	}
 
 	for _, statement := range statements {
@@ -220,6 +254,9 @@ func ensureMySQLDatabase(cfg *mysqlcfg.Config) error {
 func ensureDefaultSettings(db *sql.DB) error {
 	defaults := map[string]string{
 		SessionWindowSecondsSettingKey: strconv.Itoa(DefaultSessionWindowSeconds),
+		IMDeliveryEnabledSettingKey:    "0",
+		IMSelectedAccountSettingKey:    "",
+		IMSelectedTargetSettingKey:     "",
 	}
 
 	for key, value := range defaults {

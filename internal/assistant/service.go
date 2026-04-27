@@ -40,6 +40,10 @@ type TaskManager interface {
 	MarkReported(ids []string) error
 }
 
+type MirrorSender interface {
+	MirrorText(text string)
+}
+
 type Config struct {
 	AbortAfterASR         bool
 	PostAbortDelay        time.Duration
@@ -53,11 +57,12 @@ type Service struct {
 	reply   ReplyStreamer
 	tools   ToolRunner
 	tasks   TaskManager
+	mirror  MirrorSender
 	spk     *speaker.Speaker
 	history *historyStore
 }
 
-func New(config Config, sessionSettings sessionWindowProvider, intent IntentDecider, reply ReplyStreamer, tools ToolRunner, taskManager TaskManager, spk *speaker.Speaker) (*Service, error) {
+func New(config Config, sessionSettings sessionWindowProvider, intent IntentDecider, reply ReplyStreamer, tools ToolRunner, taskManager TaskManager, mirror MirrorSender, spk *speaker.Speaker) (*Service, error) {
 	if config.PostAbortDelay < 0 {
 		config.PostAbortDelay = 0
 	}
@@ -71,6 +76,7 @@ func New(config Config, sessionSettings sessionWindowProvider, intent IntentDeci
 		reply:   reply,
 		tools:   tools,
 		tasks:   taskManager,
+		mirror:  mirror,
 		spk:     spk,
 		history: history,
 	}, nil
@@ -206,6 +212,7 @@ func (s *Service) handleASR(session xiaoAISession, text string) {
 	}
 
 	s.history.AppendTurn(session, now, text, strings.TrimSpace(replyText.String()))
+	s.mirrorReply(replyText.String())
 	s.deliverPendingReports(session)
 	metrics.LogCompleted("reply playback")
 }
@@ -255,6 +262,7 @@ func (s *Service) handleToolCall(session xiaoAISession, history []llm.Message, t
 		}
 
 		s.history.AppendTurn(session, turnStartedAt, userText, strings.TrimSpace(result.Text))
+		s.mirrorReply(result.Text)
 		s.deliverPendingReports(session)
 		metrics.LogCompleted("tool reply playback")
 		log.Printf("tool reply playback completed: tool=%s", call.Name)
@@ -286,6 +294,7 @@ func (s *Service) handleToolCall(session xiaoAISession, history []llm.Message, t
 	}
 
 	s.history.AppendTurn(session, turnStartedAt, userText, finalReply)
+	s.mirrorReply(finalReply)
 	s.deliverPendingReports(session)
 	metrics.LogCompleted("tool reply playback")
 	log.Printf("tool reply playback completed: tool=%s", call.Name)
@@ -319,6 +328,7 @@ func (s *Service) handleAsyncTask(session xiaoAISession, turnStartedAt time.Time
 		return
 	}
 	s.history.AppendTurn(session, turnStartedAt, userText, replyText)
+	s.mirrorReply(replyText)
 	s.deliverPendingReports(session)
 	metrics.LogCompleted("async task accept")
 }
@@ -416,9 +426,21 @@ func (s *Service) deliverPendingReports(session xiaoAISession) {
 	}
 
 	s.history.AppendTurn(session, time.Now(), "", finalReply)
+	s.mirrorReply(finalReply)
 	if err := s.tasks.MarkReported(ids); err != nil {
 		log.Printf("mark pending task report failed: %v", err)
 	}
+}
+
+func (s *Service) mirrorReply(text string) {
+	if s == nil || s.mirror == nil {
+		return
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	s.mirror.MirrorText(text)
 }
 
 func buildPendingTaskNoticeContext(items []tasks.PendingReportItem) string {
