@@ -16,6 +16,9 @@ type ModelConfig struct {
 }
 
 type FileConfig struct {
+	Database struct {
+		DSN string `yaml:"dsn"`
+	} `yaml:"database"`
 	OpenAI struct {
 		BaseURL string `yaml:"base_url"`
 	} `yaml:"openai"`
@@ -62,6 +65,10 @@ func Load(rootDir string) (*AppConfig, error) {
 }
 
 func (c *AppConfig) normalize() error {
+	c.Database.DSN = strings.TrimSpace(c.Database.DSN)
+	if c.Database.DSN == "" {
+		return fmt.Errorf("database.dsn is required")
+	}
 	defaultBaseURL := strings.TrimRight(strings.TrimSpace(c.OpenAI.BaseURL), "/")
 	if defaultBaseURL == "" {
 		defaultBaseURL = "https://api.openai.com/v1"

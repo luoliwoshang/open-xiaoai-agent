@@ -100,7 +100,6 @@ Only the high-signal parts are listed here.
 Run both backend and frontend:
 
 ```sh
-export OPEN_XIAOAI_AGENT_DSN='user:pass@tcp(127.0.0.1:3306)/open_xiaoai_agent'
 npm install
 npm run dev
 ```
@@ -125,9 +124,6 @@ Common backend flags from `main.go`:
   - default `:4399`
 - `-dashboard-addr`
   - default `:8090`
-- `-db-dsn`
-  - runtime database DSN
-  - if omitted, the process falls back to env var `OPEN_XIAOAI_AGENT_DSN`
 - `-claude-cwd`
   - working directory for Claude CLI tasks
 - `-debug`
@@ -150,6 +146,7 @@ Common backend flags from `main.go`:
 
 Config domains currently used:
 
+- `database.dsn`
 - `openai.base_url`
 - `intent.model / base_url / api_key`
 - `reply.model / base_url / api_key`
@@ -159,6 +156,7 @@ Important:
 
 - `config.yaml` is intentionally ignored
 - do not commit real API keys
+- runtime database config is sourced only from `config.yaml` field `database.dsn`
 
 ## Persistent State
 

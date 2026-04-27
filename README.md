@@ -127,6 +127,9 @@ cp config.example.yaml config.yaml
 2. 按需修改 `config.yaml`：
 
 ```yaml
+database:
+  dsn: user:pass@tcp(127.0.0.1:3306)/open_xiaoai_agent
+
 openai:
   base_url: https://api.openai.com/v1
 
@@ -146,13 +149,9 @@ reply:
 
 `SOUL.md` 会在启动时一并读取，用于定义主回复的人设。`config.yaml` 已被忽略，不要提交真实密钥。
 
-3. 设置运行时数据库 DSN：
+`database.dsn` 是当前唯一的数据库配置入口，启动时会直接从 `config.yaml` 读取。
 
-```sh
-export OPEN_XIAOAI_AGENT_DSN='user:pass@tcp(127.0.0.1:3306)/open_xiaoai_agent'
-```
-
-4. 安装依赖并启动：
+3. 直接启动：
 
 ```sh
 npm install
@@ -226,7 +225,7 @@ npm run dev:web
 npm run build:web
 ```
 
-更多后端参数可用 `go run . -h` 查看，常见的有 `-addr`、`-dashboard-addr`、`-db-dsn`、`-abort-after-asr`、`-parallel-intent-chat`。如果不传 `-db-dsn`，程序会读取 `OPEN_XIAOAI_AGENT_DSN`。
+更多后端参数可用 `go run . -h` 查看，常见的有 `-addr`、`-dashboard-addr`、`-abort-after-asr`、`-parallel-intent-chat`。数据库连接固定从 `config.yaml` 的 `database.dsn` 读取。
 
 ## Dashboard API
 
