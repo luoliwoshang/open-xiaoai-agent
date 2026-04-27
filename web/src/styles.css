@@ -390,6 +390,10 @@ code {
   gap: 20px;
 }
 
+.settings-card {
+  margin-bottom: 0;
+}
+
 .focus-card {
   margin-bottom: 18px;
   padding: 18px;
@@ -422,6 +426,80 @@ code {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+}
+
+.settings-form {
+  display: grid;
+  gap: 14px;
+}
+
+.settings-field {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-field span,
+.settings-note {
+  color: rgba(237, 242, 255, 0.66);
+  line-height: 1.6;
+}
+
+.settings-input {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  padding: 14px 16px;
+  color: #edf2ff;
+  background: rgba(5, 11, 20, 0.86);
+  font: inherit;
+}
+
+.settings-input:focus {
+  outline: none;
+  border-color: rgba(42, 234, 196, 0.46);
+  box-shadow: 0 0 0 4px rgba(42, 234, 196, 0.08);
+}
+
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-button {
+  border: 0;
+  border-radius: 999px;
+  padding: 12px 18px;
+  color: #041019;
+  background: linear-gradient(135deg, #2aeac4 0%, #ffc062 100%);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    transform 180ms ease,
+    opacity 180ms ease;
+}
+
+.settings-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.settings-button:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+}
+
+.settings-feedback {
+  padding: 14px 16px;
+  border-radius: 16px;
+  color: #b8ffe0;
+  background: rgba(42, 234, 196, 0.08);
+  border: 1px solid rgba(42, 234, 196, 0.18);
+}
+
+.settings-error {
+  margin-bottom: 0;
 }
 
 .conversation-list {

@@ -17,6 +17,10 @@ type sessionKeyer interface {
 	HistoryKey() string
 }
 
+type sessionWindowProvider interface {
+	SessionWindow() time.Duration
+}
+
 type conversationHistory struct {
 	id         string
 	startedAt  time.Time
@@ -32,26 +36,22 @@ type ConversationSnapshot struct {
 }
 
 type historyStore struct {
-	mu      sync.Mutex
-	window  time.Duration
-	db      *sql.DB
-	entries map[string]*conversationHistory
+	mu       sync.Mutex
+	settings sessionWindowProvider
+	db       *sql.DB
+	entries  map[string]*conversationHistory
 }
 
-func newHistoryStore(window time.Duration, dsn string) (*historyStore, error) {
-	if window <= 0 {
-		window = 5 * time.Minute
-	}
-
+func newHistoryStore(settings sessionWindowProvider, dsn string) (*historyStore, error) {
 	db, err := storage.OpenRuntimeDB(dsn)
 	if err != nil {
 		return nil, err
 	}
 
 	store := &historyStore{
-		window:  window,
-		db:      db,
-		entries: make(map[string]*conversationHistory),
+		settings: settings,
+		db:       db,
+		entries:  make(map[string]*conversationHistory),
 	}
 	if err := store.load(); err != nil {
 		return nil, err
@@ -64,7 +64,7 @@ func (s *historyStore) Snapshot(session any, now time.Time) []llm.Message {
 	defer s.mu.Unlock()
 
 	changed := s.pruneExpiredLocked(now)
-	entry, created := s.ensureEntryLocked(session, now)
+	entry, created := s.ensureEntryLocked(session, now, false)
 	if changed || created {
 		s.saveLocked()
 	}
@@ -76,7 +76,7 @@ func (s *historyStore) AppendTurn(session any, now time.Time, user string, assis
 	defer s.mu.Unlock()
 
 	changed := s.pruneExpiredLocked(now)
-	entry, created := s.ensureEntryLocked(session, now)
+	entry, created := s.ensureEntryLocked(session, now, true)
 	if user != "" {
 		entry.messages = append(entry.messages, llm.Message{
 			Role:    "user",
@@ -169,13 +169,17 @@ func (s *historyStore) load() error {
 			return fmt.Errorf("scan conversation: %w", err)
 		}
 		started := storage.TimeFromUnixMillis(startedAt)
-		if strings.TrimSpace(id) == "" || now.Sub(started) > s.window {
+		last := storage.TimeFromUnixMillis(lastActive)
+		if last.IsZero() {
+			last = started
+		}
+		if strings.TrimSpace(id) == "" || now.Sub(last) > s.sessionWindowLocked() {
 			continue
 		}
 		s.entries[id] = &conversationHistory{
 			id:         id,
 			startedAt:  started,
-			lastActive: storage.TimeFromUnixMillis(lastActive),
+			lastActive: last,
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -214,10 +218,10 @@ func (s *historyStore) load() error {
 	return nil
 }
 
-func (s *historyStore) ensureEntryLocked(session any, now time.Time) (*conversationHistory, bool) {
+func (s *historyStore) ensureEntryLocked(session any, now time.Time, touch bool) (*conversationHistory, bool) {
 	key := conversationKey(session)
 	entry, ok := s.entries[key]
-	if !ok || now.Sub(entry.startedAt) > s.window {
+	if !ok || now.Sub(entry.lastActive) > s.sessionWindowLocked() {
 		entry = &conversationHistory{
 			id:         key,
 			startedAt:  now,
@@ -227,14 +231,17 @@ func (s *historyStore) ensureEntryLocked(session any, now time.Time) (*conversat
 		return entry, true
 	}
 
-	entry.lastActive = now
+	if touch {
+		entry.lastActive = now
+	}
 	return entry, false
 }
 
 func (s *historyStore) pruneExpiredLocked(now time.Time) bool {
 	changed := false
+	window := s.sessionWindowLocked()
 	for key, entry := range s.entries {
-		if now.Sub(entry.startedAt) <= s.window {
+		if now.Sub(entry.lastActive) <= window {
 			continue
 		}
 		delete(s.entries, key)
@@ -322,6 +329,17 @@ func (s *historyStore) saveLocked() {
 	if err := tx.Commit(); err != nil {
 		log.Printf("conversation save failed: commit: %v", err)
 	}
+}
+
+func (s *historyStore) sessionWindowLocked() time.Duration {
+	if s.settings == nil {
+		return 5 * time.Minute
+	}
+	window := s.settings.SessionWindow()
+	if window <= 0 {
+		return 5 * time.Minute
+	}
+	return window
 }
 
 func conversationKey(session any) string {

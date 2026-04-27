@@ -77,6 +77,7 @@ flowchart TD
 - 管理轻量异步任务，并在后续对话中补报进度
 - 提供独立的 React + Vite dashboard
 - 使用 MySQL 保存任务、会话和插件私有状态
+- 会话上下文默认使用滑动窗口，并支持在 Dashboard 中调整窗口秒数
 
 当前内置工具：
 
@@ -143,24 +144,24 @@ reply:
 
 `SOUL.md` 会在启动时一并读取，用于定义主回复的人设。`config.yaml` 已被忽略，不要提交真实密钥。
 
-3. 先准备数据库：
-
-```sql
-CREATE DATABASE open_xiaoai_agent CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-```
-
-4. 设置运行时数据库 DSN：
+3. 设置运行时数据库 DSN：
 
 ```sh
 export OPEN_XIAOAI_AGENT_DSN='user:pass@tcp(127.0.0.1:3306)/open_xiaoai_agent'
 ```
 
-5. 安装依赖并启动：
+4. 安装依赖并启动：
 
 ```sh
 npm install
 npm run dev
 ```
+
+服务启动后会自动：
+
+- 创建目标数据库（如果还不存在）
+- 创建运行期所需表结构
+- 写入默认会话窗口设置 `session.window_seconds = 300`
 
 默认端口：
 
@@ -230,6 +231,8 @@ Go 后端只提供 API，前端位于 `web/`。
 
 - `GET /api/healthz`
 - `GET /api/state`
+- `GET /api/settings`
+- `POST /api/settings/session`
 - `POST /api/reset`
 
 ## 验证

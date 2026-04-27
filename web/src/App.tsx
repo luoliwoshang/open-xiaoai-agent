@@ -1,11 +1,22 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { ClaudeRecord, ConversationSnapshot, DashboardState, Task, TaskEvent, TaskState } from './types'
+import type {
+  ClaudeRecord,
+  ConversationSnapshot,
+  DashboardState,
+  SessionSettings,
+  Task,
+  TaskEvent,
+  TaskState,
+} from './types'
 
 const emptyState: DashboardState = {
   tasks: [],
   events: [],
   claude_records: [],
   conversations: [],
+  settings: {
+    session_window_seconds: 300,
+  },
 }
 
 const stateLabels: Record<TaskState, string> = {
@@ -42,6 +53,11 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  const [windowInput, setWindowInput] = useState('300')
+  const [windowDirty, setWindowDirty] = useState(false)
+  const [settingsSaving, setSettingsSaving] = useState(false)
+  const [settingsFeedback, setSettingsFeedback] = useState<string | null>(null)
+  const [settingsError, setSettingsError] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -61,6 +77,7 @@ export default function App() {
             ...conversation,
             messages: conversation?.messages ?? [],
           })),
+          settings: normalizeSettings(raw.settings),
         }
         if (!active) return
         setData(next)
@@ -82,6 +99,11 @@ export default function App() {
       window.clearInterval(timer)
     }
   }, [])
+
+  useEffect(() => {
+    if (windowDirty || settingsSaving) return
+    setWindowInput(String(data.settings.session_window_seconds))
+  }, [data.settings.session_window_seconds, settingsSaving, windowDirty])
 
   const metrics = useMemo(() => {
     const completed = countByState(data.tasks, 'completed')
@@ -134,6 +156,46 @@ export default function App() {
     }
     setSelectedTaskId(data.tasks[0].id)
   }, [data.tasks, selectedTaskId])
+
+  async function saveSessionWindowSettings() {
+    const nextValue = Number(windowInput)
+    if (!Number.isInteger(nextValue)) {
+      setSettingsError('请输入整数秒数。')
+      setSettingsFeedback(null)
+      return
+    }
+
+    setSettingsSaving(true)
+    setSettingsError(null)
+    setSettingsFeedback(null)
+
+    try {
+      const response = await fetch('/api/settings/session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ window_seconds: nextValue }),
+      })
+      if (!response.ok) {
+        throw new Error(await response.text())
+      }
+
+      const payload = (await response.json()) as { session?: SessionSettings }
+      const nextSettings = normalizeSettings(payload.session)
+      setData((current) => ({
+        ...current,
+        settings: nextSettings,
+      }))
+      setWindowInput(String(nextSettings.session_window_seconds))
+      setWindowDirty(false)
+      setSettingsFeedback('已保存，后续请求会立即按新的滑动窗口秒数生效。')
+    } catch (err) {
+      setSettingsError(err instanceof Error ? err.message : '保存失败')
+    } finally {
+      setSettingsSaving(false)
+    }
+  }
 
   return (
     <div className="app-shell">
@@ -266,6 +328,53 @@ export default function App() {
         </section>
 
         <aside className="panel panel-side">
+          <section className="focus-card settings-card">
+            <div className="focus-card-head">
+              <div>
+                <p className="eyebrow">SESSION SETTINGS</p>
+                <h3>会话窗口</h3>
+                <p>当前只保留滑动窗口策略。这里控制的是最近活跃多久后，系统才把上下文切到新会话。</p>
+              </div>
+              <span className="badge badge-running">滑动窗口</span>
+            </div>
+
+            <div className="settings-form">
+              <label className="settings-field">
+                <span>会话窗口秒数</span>
+                <input
+                  className="settings-input"
+                  inputMode="numeric"
+                  min={30}
+                  max={3600}
+                  step={1}
+                  type="number"
+                  value={windowInput}
+                  onChange={(event) => {
+                    setWindowInput(event.target.value)
+                    setWindowDirty(true)
+                    setSettingsFeedback(null)
+                    setSettingsError(null)
+                  }}
+                />
+              </label>
+
+              <div className="settings-actions">
+                <button
+                  className="settings-button"
+                  disabled={settingsSaving || !windowDirty}
+                  onClick={() => void saveSessionWindowSettings()}
+                  type="button"
+                >
+                  {settingsSaving ? '保存中...' : '保存设置'}
+                </button>
+                <span className="settings-note">建议范围 30 - 3600 秒，默认值 300 秒。</span>
+              </div>
+
+              {settingsFeedback ? <div className="settings-feedback">{settingsFeedback}</div> : null}
+              {settingsError ? <div className="error-banner settings-error">{settingsError}</div> : null}
+            </div>
+          </section>
+
           <section className="timeline-card">
             <div className="panel-head compact">
               <div>
@@ -386,4 +495,10 @@ export default function App() {
       </main>
     </div>
   )
+}
+
+function normalizeSettings(raw: Partial<SessionSettings> | undefined): SessionSettings {
+  return {
+    session_window_seconds: raw?.session_window_seconds ?? 300,
+  }
 }

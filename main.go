@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/amap"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/assistant"
@@ -19,6 +18,7 @@ import (
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugins/continuetask"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugins/weather"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/server"
+	"github.com/luoliwoshang/open-xiaoai-agent/internal/settings"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/speaker"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/tasks"
 )
@@ -55,6 +55,10 @@ func main() {
 	llmClient := llm.NewClient()
 	spk := speaker.New()
 	weatherClient := amap.NewClient(appConfig.AMap.APIKey)
+	settingsStore, err := settings.NewStore(dsn)
+	if err != nil {
+		log.Fatal(err)
+	}
 	taskManager, err := tasks.NewManager(dsn)
 	if err != nil {
 		log.Fatal(err)
@@ -78,10 +82,10 @@ func main() {
 		assistant.Config{
 			AbortAfterASR:         *abortAfterASR,
 			PostAbortDelay:        *postAbortDelay,
-			SessionWindow:         5 * time.Minute,
 			UseParallelIntentChat: *useParallelIntentChat,
 			StateDSN:              dsn,
 		},
+		settingsStore,
 		llm.NewIntentRecognizer(llmClient, appConfig.Intent, plugins, taskManager),
 		llm.NewReplyGenerator(llmClient, appConfig.Reply, appConfig.Soul),
 		plugins,
@@ -94,7 +98,7 @@ func main() {
 
 	srv := server.New(cfg, asrService.OnASR)
 	go func() {
-		if err := dashboard.New(*dashboardAddr, taskManager, complexTaskService, asrService).ListenAndServe(); err != nil {
+		if err := dashboard.New(*dashboardAddr, taskManager, complexTaskService, asrService, settingsStore).ListenAndServe(); err != nil {
 			log.Printf("dashboard stopped: %v", err)
 		}
 	}()

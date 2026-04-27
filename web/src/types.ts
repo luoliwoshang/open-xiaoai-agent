@@ -26,6 +26,11 @@ export type DashboardState = {
   events: TaskEvent[]
   claude_records: ClaudeRecord[]
   conversations: ConversationSnapshot[]
+  settings: SessionSettings
+}
+
+export type SessionSettings = {
+  session_window_seconds: number
 }
 
 export type ConversationMessage = {

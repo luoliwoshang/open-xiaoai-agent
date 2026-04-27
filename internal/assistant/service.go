@@ -43,7 +43,6 @@ type TaskManager interface {
 type Config struct {
 	AbortAfterASR         bool
 	PostAbortDelay        time.Duration
-	SessionWindow         time.Duration
 	UseParallelIntentChat bool
 	StateDSN              string
 }
@@ -58,14 +57,11 @@ type Service struct {
 	history *historyStore
 }
 
-func New(config Config, intent IntentDecider, reply ReplyStreamer, tools ToolRunner, taskManager TaskManager, spk *speaker.Speaker) (*Service, error) {
-	if config.SessionWindow <= 0 {
-		config.SessionWindow = 5 * time.Minute
-	}
+func New(config Config, sessionSettings sessionWindowProvider, intent IntentDecider, reply ReplyStreamer, tools ToolRunner, taskManager TaskManager, spk *speaker.Speaker) (*Service, error) {
 	if config.PostAbortDelay < 0 {
 		config.PostAbortDelay = 0
 	}
-	history, err := newHistoryStore(config.SessionWindow, config.StateDSN)
+	history, err := newHistoryStore(sessionSettings, config.StateDSN)
 	if err != nil {
 		return nil, err
 	}

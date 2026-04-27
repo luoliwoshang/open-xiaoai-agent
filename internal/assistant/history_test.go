@@ -5,6 +5,14 @@ import (
 	"time"
 )
 
+type staticSessionWindow struct {
+	window time.Duration
+}
+
+func (s staticSessionWindow) SessionWindow() time.Duration {
+	return s.window
+}
+
 type historyTestSession struct {
 	id string
 }
@@ -16,7 +24,7 @@ func (s historyTestSession) HistoryKey() string {
 func TestHistoryStoreResetsAfterWindow(t *testing.T) {
 	t.Parallel()
 
-	store, err := newHistoryStore(5*time.Minute, "")
+	store, err := newHistoryStore(staticSessionWindow{window: 5 * time.Minute}, "")
 	if err != nil {
 		t.Fatalf("newHistoryStore() error = %v", err)
 	}
@@ -35,34 +43,26 @@ func TestHistoryStoreResetsAfterWindow(t *testing.T) {
 	}
 }
 
-func TestHistoryStoreSnapshotAllKeepsActiveAndSorts(t *testing.T) {
+func TestHistoryStoreSlidingWindowUsesLastActive(t *testing.T) {
 	t.Parallel()
 
-	store, err := newHistoryStore(5*time.Minute, "")
+	store, err := newHistoryStore(staticSessionWindow{window: 5 * time.Minute}, "")
 	if err != nil {
 		t.Fatalf("newHistoryStore() error = %v", err)
 	}
-	sessionA := historyTestSession{id: "session-a"}
-	sessionB := historyTestSession{id: "session-b"}
+	session := historyTestSession{id: "session-a"}
 	start := time.Date(2026, 4, 24, 16, 0, 0, 0, time.Local)
 
-	store.AppendTurn(sessionA, start, "A1", "A2")
-	store.AppendTurn(sessionB, start.Add(2*time.Minute), "B1", "B2")
+	store.AppendTurn(session, start, "A1", "A2")
+	store.AppendTurn(session, start.Add(4*time.Minute), "A3", "A4")
 
-	snapshots := store.SnapshotAll(start.Add(3 * time.Minute))
-	if len(snapshots) != 2 {
-		t.Fatalf("len(snapshots) = %d, want 2", len(snapshots))
+	history := store.Snapshot(session, start.Add(8*time.Minute))
+	if len(history) != 4 {
+		t.Fatalf("len(history) = %d, want 4", len(history))
 	}
-	if snapshots[0].Messages[0].Content != "B1" {
-		t.Fatalf("snapshots[0].Messages[0].Content = %q, want B1", snapshots[0].Messages[0].Content)
-	}
-
-	snapshots = store.SnapshotAll(start.Add(7 * time.Minute))
-	if len(snapshots) != 1 {
-		t.Fatalf("len(snapshots) = %d, want 1 after expiration", len(snapshots))
-	}
-	if snapshots[0].Messages[0].Content != "B1" {
-		t.Fatalf("snapshots[0].Messages[0].Content = %q, want B1", snapshots[0].Messages[0].Content)
+	history = store.Snapshot(session, start.Add(10*time.Minute))
+	if len(history) != 0 {
+		t.Fatalf("len(history) = %d, want 0 after sliding expiration", len(history))
 	}
 }
 
@@ -73,13 +73,13 @@ func TestHistoryStorePersistsConversation(t *testing.T) {
 	start := time.Now()
 	session := historyTestSession{id: "session-persist"}
 
-	store, err := newHistoryStore(5*time.Minute, path)
+	store, err := newHistoryStore(staticSessionWindow{window: 5 * time.Minute}, path)
 	if err != nil {
 		t.Fatalf("newHistoryStore() error = %v", err)
 	}
 	store.AppendTurn(session, start, "你好", "你好呀")
 
-	reloaded, err := newHistoryStore(5*time.Minute, path)
+	reloaded, err := newHistoryStore(staticSessionWindow{window: 5 * time.Minute}, path)
 	if err != nil {
 		t.Fatalf("reload newHistoryStore() error = %v", err)
 	}
@@ -100,7 +100,7 @@ func TestHistoryStoreResetClearsPersistence(t *testing.T) {
 	start := time.Now()
 	session := historyTestSession{id: "session-reset"}
 
-	store, err := newHistoryStore(5*time.Minute, path)
+	store, err := newHistoryStore(staticSessionWindow{window: 5 * time.Minute}, path)
 	if err != nil {
 		t.Fatalf("newHistoryStore() error = %v", err)
 	}
@@ -114,7 +114,7 @@ func TestHistoryStoreResetClearsPersistence(t *testing.T) {
 		t.Fatalf("len(snapshots) = %d, want 0", len(snapshots))
 	}
 
-	reloaded, err := newHistoryStore(5*time.Minute, path)
+	reloaded, err := newHistoryStore(staticSessionWindow{window: 5 * time.Minute}, path)
 	if err != nil {
 		t.Fatalf("reload newHistoryStore() error = %v", err)
 	}

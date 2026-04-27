@@ -148,7 +148,7 @@ func (m *fakeTaskManager) MarkReported(ids []string) error {
 func newTestService(t *testing.T, config Config, intent IntentDecider, reply ReplyStreamer, tools ToolRunner, taskManager TaskManager, spk *speaker.Speaker) *Service {
 	t.Helper()
 
-	service, err := New(config, intent, reply, tools, taskManager, spk)
+	service, err := New(config, staticSessionWindow{window: 5 * time.Minute}, intent, reply, tools, taskManager, spk)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -501,7 +501,7 @@ func TestHandleASRIncludesSessionHistory(t *testing.T) {
 	var seenHistory []llm.Message
 
 	service := newTestService(t,
-		Config{AbortAfterASR: true, PostAbortDelay: 0, SessionWindow: 5 * time.Minute},
+		Config{AbortAfterASR: true, PostAbortDelay: 0},
 		fakeIntent{
 			onDecide: func(history []llm.Message, text string) llm.IntentDecision {
 				seenHistory = append([]llm.Message(nil), history...)
@@ -549,7 +549,6 @@ func TestHandleASRUsesSpeculativeReplyWhenEnabled(t *testing.T) {
 		Config{
 			AbortAfterASR:         true,
 			PostAbortDelay:        0,
-			SessionWindow:         5 * time.Minute,
 			UseParallelIntentChat: true,
 		},
 		fakeIntent{
