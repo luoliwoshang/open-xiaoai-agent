@@ -1,0 +1,17 @@
+{
+  "name": "open-xiaoai-agent",
+  "private": true,
+  "workspaces": [
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n go,web -c cyan,magenta \"npm:dev:go\" \"npm:dev:web\"",
+    "dev:go": "go run .",
+    "dev:web": "npm run dev --workspace web -- --host 0.0.0.0",
+    "build:web": "npm run build --workspace web",
+    "preview:web": "npm run preview --workspace web -- --host 0.0.0.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

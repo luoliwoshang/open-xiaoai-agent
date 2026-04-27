@@ -1,0 +1,12 @@
+go-instruction-server
+.gocache/
+data/tasks.json
+data/plugins/claude_code.json
+data/conversations.json
+config.yaml
+go-instruction-server
+node_modules/
+web/dist/
+web/*.tsbuildinfo
+web/vite.config.js
+web/vite.config.d.ts

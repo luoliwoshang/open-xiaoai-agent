@@ -1,0 +1,15 @@
+openai:
+  base_url: https://api.openai.com/v1
+
+amap:
+  api_key: ""
+
+intent:
+  model: qwen-turbo
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  api_key: sk-intent-placeholder
+
+reply:
+  model: qwen-turbo
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  api_key: sk-reply-placeholder
