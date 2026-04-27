@@ -1,12 +1,15 @@
 # Open XiaoAI Agent
 
-一个最小但可继续扩展的独立对话 Server，用来接收小爱音箱 Rust Client 发来的最终 ASR 文本，并按两阶段处理：
+这是一个面向 [`open-xiaoai`](https://github.com/idootop/open-xiaoai) 生态的独立服务端原型，用来验证“语音入口 + 外部对话编排 + 异步任务执行器”这条链路。当前实现里，[`open-xiaoai`](https://github.com/idootop/open-xiaoai) client 主要负责把设备侧的 ASR 结果和播放能力桥接出来，主对话编排、工具路由、异步任务、任务补报和前端看板都放在这个项目里。
 
-- `intent` 模型：非流式，优先识别是否命中本地工具
+当前原型主要验证了这几件事：
+
+- `intent` 模型：非流式，优先识别是否命中本地工具或任务接续
 - `reply` 模型：流式，边收增量边按句切段，再调用音箱本地 TTS 播放
-- `tasks`：本地 JSON 任务表，承接最小异步任务能力
+- `tasks`：本地 JSON 任务表，承接最小异步任务能力、任务查询、任务取消和任务接续
 - `dashboard api`：Go 只提供 `/api/*` 路由
 - `web`：React/Vite 前端看板，单独启动
+- `Agent executor`：当前已接入 Claude Code CLI 作为异步任务执行器之一
 
 当前完整链路是：
 
@@ -21,48 +24,45 @@
 9. 如果不命中工具，直接调 `reply` 模型流式生成回复
 10. 按增量切成适合播报的短句，顺序调用音箱本地 TTS
 
+当前边界也很明确：
+
+- 当前主要复用了小爱的 ASR 和 TTS，没有做完整的人声打断识别
+- 一些响应速度相关的优化还没有迁到这个独立 demo
+- 当前持久化还是本地 JSON 文件，目的是先把原型链路跑通
+- 后续会补独立 `IM Gateway`，把微信 / QQ 等渠道接进来，但不会把这些渠道能力耦合到 OpenClaw 或某个具体执行器里
+
 另外，当前 server 会把**同一音箱连接内首轮对话开始后的 5 分钟**视为一个会话窗口。
 
 - 会话窗口内，后续 `intent` 和 `reply` 请求都会自动带上之前的用户/助手上下文
 - 超过 5 分钟后，会自动开启一个新的会话，不再携带旧上下文
 
-## 结构
+## 依赖信息
 
-当前工程只保留几层必要结构：
+当前项目是一个 Go 后端加 React 看板的单仓应用，主要依赖如下：
 
-- `main.go`
-  负责启动参数和装配依赖
-- `package.json`
-  负责同时拉起 Go API 和 React 看板
-- `internal/plugins`
-  负责插件聚合和内置插件目录拆分；当前天气、股票、能力列表、异步任务类工具都各自独立成包
-- `internal/assistant`
-  负责主流程编排：`ASR -> intent -> abort -> tool/reply -> speaker`
-- `internal/llm`
-  负责 OpenAI 兼容协议调用，以及带 tool definitions 的意图识别
-- `internal/plugin`
-  负责本地工具注册、工具描述导出和命中后的闭包执行
-- `internal/tasks`
-  负责本地 JSON 任务表、异步任务状态和事件
-- `internal/dashboard`
-  负责本地任务 API
-- `internal/server`
-  负责 WebSocket 接入、连接会话、RPC 调用、`abort` 能力
-- `internal/speaker`
-  负责复用音箱本地 TTS，播放单段文字，以及把流式增量切成可播报短句
-- `internal/instruction`
-  负责从 `instruction` 事件里提取最终 ASR 文本
-- `internal/config`
-  负责读取根目录里的 `config.yaml` 和 `SOUL.md`
+- Go
+  - `go 1.24.0`
+  - 主要依赖：
+    - `github.com/gorilla/websocket v1.5.3`
+    - `gopkg.in/yaml.v3 v3.0.1`
+- Node.js / npm
+  - 用于启动前端看板和根目录并发脚本
+- React
+  - `react ^19.1.0`
+  - `react-dom ^19.1.0`
+- Vite
+  - `vite ^6.3.5`
+- TypeScript
+  - `typescript ^5.8.3`
+- 其他前端开发依赖
+  - `@vitejs/plugin-react ^4.4.1`
+  - `concurrently ^9.2.1`
 
-这样拆分后：
+补一句边界：
 
-- 入口文件不再堆业务判断
-- OpenAI 协议细节不会污染主流程
-- 工具注册和工具执行不会污染意图层
-- `abort`、单段播放、流式切句播放都是独立能力
-- `SOUL.md` 和模型配置都在根目录显式管理
-- 后面你要替换意图模型、回复模型或业务规则，不需要回头拆主入口
+- 当前前端是 `React + Vite`，不是 `Vue`
+- 当前后端是单二进制 Go 服务，没有额外数据库和消息队列依赖
+- 当前持久化仍然是本地 JSON 文件，不依赖 SQLite、Redis 或外部任务系统
 
 ## 配置
 
@@ -181,6 +181,29 @@ Go 侧只提供：
 
 - `GET /api/healthz`
 - `GET /api/state`
+
+## 后续规划
+
+当前版本主要验证的是：
+
+- `open-xiaoai` 作为设备接入层和语音入口
+- 外部对话 Server 承接 ASR、工具路由、异步任务和 TTS 编排
+- OpenClaw / Claude Code 这类 Agent 作为可插拔执行器
+
+后续规划里，会补一层独立的 `IM Gateway`，用于把微信、QQ 等 IM 渠道接进来。这层的职责会明确收在“渠道接入与消息投递”，而不是塞进 OpenClaw：
+
+- `IM Gateway`
+  - 负责微信 / QQ / 其他 IM 渠道接入
+  - 负责账号绑定、渠道标识、消息收发和回调适配
+  - 负责把 IM 消息转换成统一的会话输入，再交给当前 Agent Server
+- `Agent Server`
+  - 继续负责主对话编排、工具路由、异步任务管理、任务补报和上下文
+  - 不直接耦合某个具体 IM 平台 SDK
+- `OpenClaw`
+  - 只作为异步任务执行器之一
+  - 负责干活，不负责渠道触达
+
+这层边界确定以后，小爱、微信、QQ 这些入口都只是同一个 Agent Server 的不同渠道，OpenClaw 只是执行器，不再承担任何 IM 侧耦合职责。
 
 ## 当前示例行为
 
