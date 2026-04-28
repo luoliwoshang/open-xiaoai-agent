@@ -67,6 +67,7 @@ type fakeIM struct {
 	confirmSession  string
 	debugText       string
 	debugImage      im.ImageSendRequest
+	debugFile       im.FileSendRequest
 	debugReceipt    im.DeliveryReceipt
 	resetCalls      int
 }
@@ -165,6 +166,29 @@ func (f *fakeIM) SendImageToDefaultChannel(req im.ImageSendRequest) (im.Delivery
 		},
 		MessageID:     "img_1",
 		Kind:          im.DeliveryKindImage,
+		Caption:       req.Caption,
+		MediaFileName: req.FileName,
+		MediaMimeType: req.MimeType,
+	}, nil
+}
+
+func (f *fakeIM) SendFileToDefaultChannel(req im.FileSendRequest) (im.DeliveryReceipt, error) {
+	f.debugFile = req
+	return im.DeliveryReceipt{
+		Account: im.Account{
+			ID:              "account_1",
+			Platform:        im.PlatformWeChat,
+			RemoteAccountID: "bot@im.bot",
+			DisplayName:     "bot@im.bot",
+		},
+		Target: im.Target{
+			ID:           "target_1",
+			AccountID:    "account_1",
+			Name:         "我的微信",
+			TargetUserID: "user@im.wechat",
+		},
+		MessageID:     "file_1",
+		Kind:          im.DeliveryKindFile,
 		Caption:       req.Caption,
 		MediaFileName: req.FileName,
 		MediaMimeType: req.MimeType,
@@ -463,6 +487,65 @@ func TestHandleIMDebugSendImageDefaultUsesUploadedFile(t *testing.T) {
 	}
 	if payload.Receipt.MediaFileName != "rabbit.png" {
 		t.Fatalf("MediaFileName = %q, want rabbit.png", payload.Receipt.MediaFileName)
+	}
+}
+
+func TestHandleIMDebugSendFileDefaultUsesUploadedFile(t *testing.T) {
+	t.Parallel()
+
+	imGateway := &fakeIM{}
+	server := New(":0", nil, nil, nil, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, imGateway, &fakeLogs{})
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	fileWriter, err := writer.CreateFormFile("file", "story.txt")
+	if err != nil {
+		t.Fatalf("CreateFormFile() error = %v", err)
+	}
+	if _, err := fileWriter.Write([]byte("file-data")); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if err := writer.WriteField("caption", "测试文件"); err != nil {
+		t.Fatalf("WriteField() error = %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/im/debug/send-file-default", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	recorder := httptest.NewRecorder()
+
+	server.handleIMDebugSendFileDefault(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if imGateway.debugFile.FileName != "story.txt" {
+		t.Fatalf("FileName = %q, want story.txt", imGateway.debugFile.FileName)
+	}
+	if string(imGateway.debugFile.Content) != "file-data" {
+		t.Fatalf("Content = %q, want file-data", string(imGateway.debugFile.Content))
+	}
+	if imGateway.debugFile.Caption != "测试文件" {
+		t.Fatalf("Caption = %q, want 测试文件", imGateway.debugFile.Caption)
+	}
+
+	var payload struct {
+		OK      bool               `json:"ok"`
+		Receipt im.DeliveryReceipt `json:"receipt"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if !payload.OK {
+		t.Fatal("OK = false, want true")
+	}
+	if payload.Receipt.Kind != im.DeliveryKindFile {
+		t.Fatalf("Kind = %q, want %q", payload.Receipt.Kind, im.DeliveryKindFile)
+	}
+	if payload.Receipt.MediaFileName != "story.txt" {
+		t.Fatalf("MediaFileName = %q, want story.txt", payload.Receipt.MediaFileName)
 	}
 }
 

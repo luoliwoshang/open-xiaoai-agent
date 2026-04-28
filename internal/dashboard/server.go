@@ -35,6 +35,7 @@ type Server struct {
 		ConfirmWeChatLogin(sessionKey string) (im.Account, error)
 		SendTextToDefaultChannel(text string) (im.DeliveryReceipt, error)
 		SendImageToDefaultChannel(req im.ImageSendRequest) (im.DeliveryReceipt, error)
+		SendFileToDefaultChannel(req im.FileSendRequest) (im.DeliveryReceipt, error)
 		UpsertTarget(accountID string, name string, targetUserID string, setDefault bool) (im.Target, error)
 		SetDefaultTarget(accountID string, targetID string) error
 		DeleteTarget(targetID string) error
@@ -60,6 +61,7 @@ func New(addr string, tasks *tasks.Manager, claude *complextask.Service, convers
 	ConfirmWeChatLogin(sessionKey string) (im.Account, error)
 	SendTextToDefaultChannel(text string) (im.DeliveryReceipt, error)
 	SendImageToDefaultChannel(req im.ImageSendRequest) (im.DeliveryReceipt, error)
+	SendFileToDefaultChannel(req im.FileSendRequest) (im.DeliveryReceipt, error)
 	UpsertTarget(accountID string, name string, targetUserID string, setDefault bool) (im.Target, error)
 	SetDefaultTarget(accountID string, targetID string) error
 	DeleteTarget(targetID string) error
@@ -93,6 +95,7 @@ func (s *Server) ListenAndServe() error {
 	mux.HandleFunc("/api/im/wechat/login/confirm", s.handleWeChatLoginConfirm)
 	mux.HandleFunc("/api/im/debug/send-default", s.handleIMDebugSendDefault)
 	mux.HandleFunc("/api/im/debug/send-image-default", s.handleIMDebugSendImageDefault)
+	mux.HandleFunc("/api/im/debug/send-file-default", s.handleIMDebugSendFileDefault)
 	mux.HandleFunc("/api/im/targets", s.handleIMTargets)
 	mux.HandleFunc("/api/im/targets/default", s.handleIMTargetDefault)
 	mux.HandleFunc("/api/im/targets/delete", s.handleIMTargetDelete)
@@ -379,28 +382,16 @@ func (s *Server) handleIMDebugSendImageDefault(w http.ResponseWriter, r *http.Re
 		http.Error(w, "im gateway is not configured", http.StatusServiceUnavailable)
 		return
 	}
-	if err := r.ParseMultipartForm(16 << 20); err != nil {
+	upload, err := parseUploadedFile(r, 16<<20, "file")
+	if err != nil {
 		http.Error(w, fmt.Sprintf("parse image upload form: %v", err), http.StatusBadRequest)
 		return
 	}
 
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		http.Error(w, fmt.Sprintf("read image upload file: %v", err), http.StatusBadRequest)
-		return
-	}
-	defer file.Close()
-
-	content, err := io.ReadAll(file)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("read image upload content: %v", err), http.StatusBadRequest)
-		return
-	}
-
 	receipt, err := s.im.SendImageToDefaultChannel(im.ImageSendRequest{
-		FileName: header.Filename,
-		MimeType: header.Header.Get("Content-Type"),
-		Content:  content,
+		FileName: upload.FileName,
+		MimeType: upload.MimeType,
+		Content:  upload.Content,
 		Caption:  r.FormValue("caption"),
 	})
 	if err != nil {
@@ -411,6 +402,67 @@ func (s *Server) handleIMDebugSendImageDefault(w http.ResponseWriter, r *http.Re
 		"ok":      true,
 		"receipt": receipt,
 	})
+}
+
+func (s *Server) handleIMDebugSendFileDefault(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.im == nil {
+		http.Error(w, "im gateway is not configured", http.StatusServiceUnavailable)
+		return
+	}
+	upload, err := parseUploadedFile(r, 32<<20, "file")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("parse file upload form: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	receipt, err := s.im.SendFileToDefaultChannel(im.FileSendRequest{
+		FileName: upload.FileName,
+		MimeType: upload.MimeType,
+		Content:  upload.Content,
+		Caption:  r.FormValue("caption"),
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"ok":      true,
+		"receipt": receipt,
+	})
+}
+
+type uploadedFormFile struct {
+	FileName string
+	MimeType string
+	Content  []byte
+}
+
+func parseUploadedFile(r *http.Request, maxMemory int64, fieldName string) (uploadedFormFile, error) {
+	if err := r.ParseMultipartForm(maxMemory); err != nil {
+		return uploadedFormFile{}, err
+	}
+
+	file, header, err := r.FormFile(fieldName)
+	if err != nil {
+		return uploadedFormFile{}, err
+	}
+	defer file.Close()
+
+	content, err := io.ReadAll(file)
+	if err != nil {
+		return uploadedFormFile{}, err
+	}
+
+	return uploadedFormFile{
+		FileName: header.Filename,
+		MimeType: header.Header.Get("Content-Type"),
+		Content:  content,
+	}, nil
 }
 
 func (s *Server) handleIMTargets(w http.ResponseWriter, r *http.Request) {

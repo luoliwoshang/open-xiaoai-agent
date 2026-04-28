@@ -6,6 +6,7 @@ const (
 	PlatformWeChat    = "weixin"
 	DeliveryKindText  = "text"
 	DeliveryKindImage = "image"
+	DeliveryKindFile  = "file"
 )
 
 type Account struct {
@@ -70,6 +71,13 @@ type PreparedImage struct {
 	Size     int64
 }
 
+type PreparedFile struct {
+	FilePath string
+	FileName string
+	MimeType string
+	Size     int64
+}
+
 type ImageSendRequest struct {
 	FileName string
 	MimeType string
@@ -78,6 +86,17 @@ type ImageSendRequest struct {
 }
 
 type ImageSendResult struct {
+	MessageID string
+}
+
+type FileSendRequest struct {
+	FileName string
+	MimeType string
+	Content  []byte
+	Caption  string
+}
+
+type FileSendResult struct {
 	MessageID string
 }
 

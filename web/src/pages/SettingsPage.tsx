@@ -103,6 +103,12 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
   const [debugImageSending, setDebugImageSending] = useState(false)
   const [debugImageFeedback, setDebugImageFeedback] = useState<string | null>(null)
   const [debugImageError, setDebugImageError] = useState<string | null>(null)
+  const [debugFileFile, setDebugFileFile] = useState<File | null>(null)
+  const [debugFileCaption, setDebugFileCaption] = useState('')
+  const [debugFileInputKey, setDebugFileInputKey] = useState(0)
+  const [debugFileSending, setDebugFileSending] = useState(false)
+  const [debugFileFeedback, setDebugFileFeedback] = useState<string | null>(null)
+  const [debugFileError, setDebugFileError] = useState<string | null>(null)
 
   const [loginPanel, setLoginPanel] = useState<LoginPanelState>(emptyLoginState)
 
@@ -472,6 +478,39 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
     }
   }
 
+  async function sendDebugFile() {
+    if (!debugFileFile) {
+      setDebugFileError('请先选择一个文件。')
+      setDebugFileFeedback(null)
+      return
+    }
+
+    const payload = new FormData()
+    payload.set('file', debugFileFile)
+    payload.set('caption', debugFileCaption)
+
+    setDebugFileSending(true)
+    setDebugFileError(null)
+    setDebugFileFeedback(null)
+    try {
+      const result = await postFormData<{ receipt?: IMDeliveryReceipt }>('/api/im/debug/send-file-default', payload)
+      await refresh()
+      setDebugFileFile(null)
+      setDebugFileCaption('')
+      setDebugFileInputKey((current) => current + 1)
+      if (result.receipt) {
+        const label = result.receipt.media_file_name || debugFileFile.name
+        setDebugFileFeedback(`测试文件 ${label} 已发送到 ${result.receipt.account.display_name || result.receipt.account.remote_account_id} / ${result.receipt.target.name}。`)
+      } else {
+        setDebugFileFeedback('测试文件发送成功。')
+      }
+    } catch (err) {
+      setDebugFileError(err instanceof Error ? err.message : '发送测试文件失败')
+    } finally {
+      setDebugFileSending(false)
+    }
+  }
+
   return (
     <main className="settings-page">
       <section className="settings-hero-card">
@@ -597,11 +636,28 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
                 imageFileName={debugImageFile?.name ?? null}
                 imageInputKey={debugImageInputKey}
                 imageSending={debugImageSending}
+                fileCaption={debugFileCaption}
+                fileError={debugFileError}
+                fileFeedback={debugFileFeedback}
+                fileFileName={debugFileFile?.name ?? null}
+                fileInputKey={debugFileInputKey}
+                fileSending={debugFileSending}
                 target={savedDebugTarget}
                 text={debugText}
                 textError={debugTextError}
                 textFeedback={debugTextFeedback}
                 textSending={debugTextSending}
+                onFileCaptionChange={(value) => {
+                  setDebugFileCaption(value)
+                  setDebugFileFeedback(null)
+                  setDebugFileError(null)
+                }}
+                onFileFileChange={(file) => {
+                  setDebugFileFile(file)
+                  setDebugFileFeedback(null)
+                  setDebugFileError(null)
+                }}
+                onSendFile={() => void sendDebugFile()}
                 onImageCaptionChange={(value) => {
                   setDebugImageCaption(value)
                   setDebugImageFeedback(null)

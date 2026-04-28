@@ -108,7 +108,7 @@ export type IMDeliveryReceipt = {
   account: IMAccount
   target: IMTarget
   message_id: string
-  kind: 'text' | 'image'
+  kind: 'text' | 'image' | 'file'
   text?: string
   caption?: string
   media_file_name?: string

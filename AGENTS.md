@@ -23,7 +23,7 @@ Current responsibilities:
 - run `reply` generation for normal chat and tool-result summarization
 - drive local TTS playback on the device through the existing client protocol
 - maintain lightweight async tasks
-- provide phase-1 IM gateway capability for WeChat text delivery plus default-channel image debug send
+- provide phase-1 IM gateway capability for WeChat text delivery plus default-channel image/file debug send
 - persist backend runtime logs and expose them through the dashboard API
 - expose a React dashboard over API + web frontend
 
@@ -207,11 +207,11 @@ IM gateway store:
   - logged-in IM accounts
   - default text delivery targets
   - recent IM gateway events
-- current scope is text delivery plus default-channel image debug send
+- current scope is text delivery plus default-channel image/file debug send
 
 Media cache:
 
-- uploaded IM debug images are cached on local disk before adapter delivery
+- uploaded IM debug images/files are cached on local disk before adapter delivery
 - cache directory comes from `config.yaml` field `im.media_cache_dir`
 - current default is `.cache/im-media` under the repo root
 - files are intentionally not auto-cleaned yet

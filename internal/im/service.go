@@ -305,6 +305,23 @@ func (s *Service) SendImageToDefaultChannel(req ImageSendRequest) (DeliveryRecei
 	return s.deliverImage(cfg.IMSelectedAccountID, cfg.IMSelectedTargetID, prepared, req.Caption)
 }
 
+func (s *Service) SendFileToDefaultChannel(req FileSendRequest) (DeliveryReceipt, error) {
+	if s == nil || s.store == nil || s.settings == nil || s.mediaCache == nil {
+		return DeliveryReceipt{}, fmt.Errorf("im service is not configured")
+	}
+
+	cfg := s.settings.Snapshot()
+	if strings.TrimSpace(cfg.IMSelectedAccountID) == "" || strings.TrimSpace(cfg.IMSelectedTargetID) == "" {
+		return DeliveryReceipt{}, fmt.Errorf("默认渠道尚未配置，请先保存账号和触达目标")
+	}
+
+	prepared, err := s.mediaCache.StoreFile(req)
+	if err != nil {
+		return DeliveryReceipt{}, err
+	}
+	return s.deliverFile(cfg.IMSelectedAccountID, cfg.IMSelectedTargetID, prepared, req.Caption)
+}
+
 func (s *Service) Reset() error {
 	if s == nil || s.store == nil {
 		return nil
@@ -421,6 +438,43 @@ func (s *Service) deliverImage(accountID string, targetID string, image Prepared
 		Caption:       strings.TrimSpace(caption),
 		MediaFileName: image.FileName,
 		MediaMimeType: image.MimeType,
+	}, nil
+}
+
+func (s *Service) deliverFile(accountID string, targetID string, file PreparedFile, caption string) (DeliveryReceipt, error) {
+	account, target, adapter, err := s.resolveDelivery(accountID, targetID)
+	if err != nil {
+		return DeliveryReceipt{}, err
+	}
+
+	log.Printf("im file delivery started: account=%s target=%s platform=%s file=%q mime=%s size=%d caption_len=%d", account.ID, target.ID, account.Platform, file.FileName, file.MimeType, file.Size, len(strings.TrimSpace(caption)))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	result, err := adapter.SendFile(ctx, account, target, file, caption)
+	if err != nil {
+		_ = s.store.MarkDeliveryFailure(account.ID, err.Error())
+		s.appendEvent(account.ID, "send_failed", fmt.Sprintf("发送文件到 %s 失败：%s", target.Name, err.Error()))
+		log.Printf("im file delivery failed: account=%s target=%s platform=%s file=%q err=%v", account.ID, target.ID, account.Platform, file.FileName, err)
+		return DeliveryReceipt{}, err
+	}
+
+	_ = s.store.MarkDeliverySuccess(account.ID)
+	eventLabel := strings.TrimSpace(caption)
+	if eventLabel == "" {
+		eventLabel = file.FileName
+	}
+	s.appendEvent(account.ID, "send_file", fmt.Sprintf("已发送文件到 %s：%s", target.Name, trimForEvent(eventLabel)))
+	log.Printf("im file delivery succeeded: account=%s target=%s platform=%s file=%q message_id=%s", account.ID, target.ID, account.Platform, file.FileName, result.MessageID)
+	return DeliveryReceipt{
+		Account:       account,
+		Target:        target,
+		MessageID:     result.MessageID,
+		Kind:          DeliveryKindFile,
+		Caption:       strings.TrimSpace(caption),
+		MediaFileName: file.FileName,
+		MediaMimeType: file.MimeType,
 	}, nil
 }
 

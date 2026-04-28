@@ -21,4 +21,5 @@ type Adapter interface {
 	PollLogin(ctx context.Context, sessionKey string) (WeChatLoginResult, error)
 	SendText(ctx context.Context, account Account, target Target, text string) (TextSendResult, error)
 	SendImage(ctx context.Context, account Account, target Target, image PreparedImage, caption string) (ImageSendResult, error)
+	SendFile(ctx context.Context, account Account, target Target, file PreparedFile, caption string) (FileSendResult, error)
 }

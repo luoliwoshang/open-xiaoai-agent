@@ -14,11 +14,20 @@ type Props = {
   imageSending: boolean
   imageFeedback: string | null
   imageError: string | null
+  fileCaption: string
+  fileFileName: string | null
+  fileInputKey: number
+  fileSending: boolean
+  fileFeedback: string | null
+  fileError: string | null
   onTextChange: (value: string) => void
   onSendText: () => void
   onImageCaptionChange: (value: string) => void
   onImageFileChange: (file: File | null) => void
   onSendImage: () => void
+  onFileCaptionChange: (value: string) => void
+  onFileFileChange: (file: File | null) => void
+  onSendFile: () => void
 }
 
 export function IMDebugSendPanel({
@@ -35,11 +44,20 @@ export function IMDebugSendPanel({
   imageSending,
   imageFeedback,
   imageError,
+  fileCaption,
+  fileFileName,
+  fileInputKey,
+  fileSending,
+  fileFeedback,
+  fileError,
   onTextChange,
   onSendText,
   onImageCaptionChange,
   onImageFileChange,
   onSendImage,
+  onFileCaptionChange,
+  onFileFileChange,
+  onSendFile,
 }: Props) {
   const ready = Boolean(account && target)
 
@@ -150,6 +168,47 @@ export function IMDebugSendPanel({
 
         {imageFeedback ? <div className="settings-feedback">{imageFeedback}</div> : null}
         {imageError ? <div className="error-banner settings-error">{imageError}</div> : null}
+
+        <label className="settings-field">
+          <span>测试文件</span>
+          <input
+            className="settings-input"
+            disabled={!ready || fileSending}
+            key={fileInputKey}
+            type="file"
+            onChange={(event) => onFileFileChange(event.target.files?.[0] ?? null)}
+          />
+          <span className="settings-note">
+            {fileFileName ? `已选择：${fileFileName}` : '允许选择任意文件，服务端会先落到媒体缓存目录，再按微信文件消息发送。'}
+          </span>
+        </label>
+
+        <label className="settings-field">
+          <span>文件说明</span>
+          <textarea
+            className="settings-textarea"
+            disabled={!ready || fileSending}
+            placeholder="例如：这是本次调试要发送的文件。"
+            rows={3}
+            value={fileCaption}
+            onChange={(event) => onFileCaptionChange(event.target.value)}
+          />
+        </label>
+
+        <div className="settings-actions">
+          <button
+            className="settings-button"
+            disabled={!ready || fileSending || !fileFileName}
+            onClick={() => onSendFile()}
+            type="button"
+          >
+            {fileSending ? '发送中...' : '发送测试文件'}
+          </button>
+          <span className="settings-note">如果填写了文件说明，微信侧会先收到一条文字，再收到文件。</span>
+        </div>
+
+        {fileFeedback ? <div className="settings-feedback">{fileFeedback}</div> : null}
+        {fileError ? <div className="error-banner settings-error">{fileError}</div> : null}
       </div>
     </article>
   )
