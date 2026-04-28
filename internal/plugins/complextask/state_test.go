@@ -2,12 +2,14 @@ package complextask
 
 import (
 	"testing"
+
+	"github.com/luoliwoshang/open-xiaoai-agent/internal/testmysql"
 )
 
 func TestStoreStartAndSnapshot(t *testing.T) {
 	t.Parallel()
 
-	store, err := NewStore("sqlite://" + t.TempDir() + "/agent.db")
+	store, err := NewStore(testmysql.NewDSN(t))
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}
@@ -55,7 +57,7 @@ func TestStoreStartAndSnapshot(t *testing.T) {
 func TestStoreResetClearsRecords(t *testing.T) {
 	t.Parallel()
 
-	store, err := NewStore("sqlite://" + t.TempDir() + "/agent.db")
+	store, err := NewStore(testmysql.NewDSN(t))
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}
@@ -74,7 +76,7 @@ func TestStoreResetClearsRecords(t *testing.T) {
 func TestStoreResetBlocksStaleUpdates(t *testing.T) {
 	t.Parallel()
 
-	store, err := NewStore("sqlite://" + t.TempDir() + "/agent.db")
+	store, err := NewStore(testmysql.NewDSN(t))
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}

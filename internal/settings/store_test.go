@@ -3,12 +3,14 @@ package settings
 import (
 	"testing"
 	"time"
+
+	"github.com/luoliwoshang/open-xiaoai-agent/internal/testmysql"
 )
 
 func TestNewStoreLoadsDefaultSessionWindowSeconds(t *testing.T) {
 	t.Parallel()
 
-	store, err := NewStore("sqlite://" + t.TempDir() + "/agent.db")
+	store, err := NewStore(testmysql.NewDSN(t))
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}
@@ -25,7 +27,7 @@ func TestNewStoreLoadsDefaultSessionWindowSeconds(t *testing.T) {
 func TestStoreUpdateSessionWindowSeconds(t *testing.T) {
 	t.Parallel()
 
-	dsn := "sqlite://" + t.TempDir() + "/agent.db"
+	dsn := testmysql.NewDSN(t)
 	store, err := NewStore(dsn)
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
@@ -51,7 +53,7 @@ func TestStoreUpdateSessionWindowSeconds(t *testing.T) {
 func TestStoreRejectsInvalidSessionWindowSeconds(t *testing.T) {
 	t.Parallel()
 
-	store, err := NewStore("sqlite://" + t.TempDir() + "/agent.db")
+	store, err := NewStore(testmysql.NewDSN(t))
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}
@@ -66,7 +68,7 @@ func TestStoreRejectsInvalidSessionWindowSeconds(t *testing.T) {
 func TestStoreUpdateIMDelivery(t *testing.T) {
 	t.Parallel()
 
-	dsn := "sqlite://" + t.TempDir() + "/agent.db"
+	dsn := testmysql.NewDSN(t)
 	store, err := NewStore(dsn)
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
@@ -104,7 +106,7 @@ func TestStoreUpdateIMDelivery(t *testing.T) {
 func TestStoreRejectsInvalidIMDeliveryWhenEnabled(t *testing.T) {
 	t.Parallel()
 
-	store, err := NewStore("sqlite://" + t.TempDir() + "/agent.db")
+	store, err := NewStore(testmysql.NewDSN(t))
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}

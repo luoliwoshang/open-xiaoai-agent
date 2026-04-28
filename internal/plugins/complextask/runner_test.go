@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugin"
+	"github.com/luoliwoshang/open-xiaoai-agent/internal/testmysql"
 )
 
 type fakeReporter struct {
@@ -31,7 +32,7 @@ func (f *fakeReporter) Event(eventType string, message string) error {
 func TestStreamParserHandlesClaudeOutput(t *testing.T) {
 	t.Parallel()
 
-	store, err := NewStore("sqlite://" + t.TempDir() + "/agent.db")
+	store, err := NewStore(testmysql.NewDSN(t))
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}

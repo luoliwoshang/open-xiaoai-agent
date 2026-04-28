@@ -33,7 +33,7 @@ Current non-goals / known missing pieces:
 - no group routing in IM gateway yet
 - no proper voice interruption detection
 - some latency optimizations were intentionally not carried over from earlier experiments
-- persistence is MySQL-backed, not SQLite / Redis / MQ
+- persistence is MySQL-backed, not Redis / MQ
 
 ## Tech Stack
 

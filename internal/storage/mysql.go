@@ -3,15 +3,12 @@ package storage
 import (
 	"database/sql"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	mysqlcfg "github.com/go-sql-driver/mysql"
-	_ "github.com/mattn/go-sqlite3"
 )
 
 const (
@@ -26,12 +23,6 @@ func OpenRuntimeDB(dsn string) (*sql.DB, error) {
 	dsn = strings.TrimSpace(dsn)
 	if dsn == "" {
 		return nil, nil
-	}
-	if strings.HasPrefix(dsn, "sqlite://") {
-		return openSQLite(strings.TrimPrefix(dsn, "sqlite://"))
-	}
-	if strings.HasPrefix(dsn, "sqlite:") {
-		return openSQLite(strings.TrimPrefix(dsn, "sqlite:"))
 	}
 	return openMySQL(dsn)
 }
@@ -87,36 +78,6 @@ func openMySQL(rawDSN string) (*sql.DB, error) {
 	if err := db.Ping(); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("ping mysql: %w", err)
-	}
-	if err := ensureSchema(db); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	return db, nil
-}
-
-func openSQLite(path string) (*sql.DB, error) {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return nil, nil
-	}
-
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, fmt.Errorf("create sqlite dir: %w", err)
-	}
-
-	dsn := fmt.Sprintf("%s?_busy_timeout=5000&_foreign_keys=on&_journal_mode=WAL&_synchronous=NORMAL", path)
-	db, err := sql.Open("sqlite3", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("open sqlite: %w", err)
-	}
-	db.SetMaxOpenConns(1)
-	db.SetConnMaxLifetime(0)
-	db.SetMaxIdleConns(1)
-
-	if err := db.Ping(); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("ping sqlite: %w", err)
 	}
 	if err := ensureSchema(db); err != nil {
 		_ = db.Close()

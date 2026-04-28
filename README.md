@@ -128,7 +128,7 @@ cp config.example.yaml config.yaml
 
 ```yaml
 database:
-  dsn: user:pass@tcp(127.0.0.1:3306)/open_xiaoai_agent
+  dsn: root:root@tcp(127.0.0.1:3306)/open_xiaoai_agent
 
 openai:
   base_url: https://api.openai.com/v1
@@ -151,7 +151,15 @@ reply:
 
 `database.dsn` 是当前唯一的数据库配置入口，启动时会直接从 `config.yaml` 读取。
 
-3. 直接启动：
+3. 启动本地 MySQL：
+
+```sh
+npm run db:up
+```
+
+仓库根目录自带了 `compose.yaml`，会启动一个本地 MySQL 8 容器，默认连接信息就是上面的 `root:root@tcp(127.0.0.1:3306)/open_xiaoai_agent`。
+
+4. 直接启动：
 
 ```sh
 npm install
@@ -181,6 +189,13 @@ go run .
 
 ```sh
 npm run dev:web
+```
+
+如果需要看数据库状态：
+
+```sh
+npm run db:ps
+npm run db:logs
 ```
 
 ## 连接设备

@@ -5,6 +5,10 @@
     "web"
   ],
   "scripts": {
+    "db:up": "docker compose up -d mysql",
+    "db:down": "docker compose down",
+    "db:logs": "docker compose logs -f mysql",
+    "db:ps": "docker compose ps",
     "dev": "concurrently -k -n go,web -c cyan,magenta \"npm:dev:go\" \"npm:dev:web\"",
     "dev:go": "go run .",
     "dev:web": "npm run dev --workspace web -- --host 0.0.0.0",

@@ -7,13 +7,13 @@ import (
 	"time"
 
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugin"
+	"github.com/luoliwoshang/open-xiaoai-agent/internal/testmysql"
 )
 
 func TestManagerSubmitCompletesAndReports(t *testing.T) {
 	t.Helper()
 
-	dir := t.TempDir()
-	manager, err := NewManager("sqlite://" + dir + "/agent.db")
+	manager, err := NewManager(testmysql.NewDSN(t))
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
@@ -69,8 +69,7 @@ func TestManagerSubmitCompletesAndReports(t *testing.T) {
 func TestManagerCancelLatest(t *testing.T) {
 	t.Helper()
 
-	dir := t.TempDir()
-	manager, err := NewManager("sqlite://" + dir + "/agent.db")
+	manager, err := NewManager(testmysql.NewDSN(t))
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
@@ -122,7 +121,7 @@ func TestManagerCancelLatest(t *testing.T) {
 func TestCompletedTasksForIntentIncludesPluginSummary(t *testing.T) {
 	t.Helper()
 
-	manager, err := NewManager("sqlite://" + t.TempDir() + "/agent.db")
+	manager, err := NewManager(testmysql.NewDSN(t))
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
@@ -150,7 +149,7 @@ func TestCompletedTasksForIntentIncludesPluginSummary(t *testing.T) {
 func TestSnapshotFiltersClaudeOutputEvents(t *testing.T) {
 	t.Helper()
 
-	manager, err := NewManager("sqlite://" + t.TempDir() + "/agent.db")
+	manager, err := NewManager(testmysql.NewDSN(t))
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
@@ -185,7 +184,7 @@ func TestSnapshotFiltersClaudeOutputEvents(t *testing.T) {
 func TestSummarizeProgressIncludesStateAndSummary(t *testing.T) {
 	t.Helper()
 
-	manager, err := NewManager("sqlite://" + t.TempDir() + "/agent.db")
+	manager, err := NewManager(testmysql.NewDSN(t))
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
@@ -211,7 +210,7 @@ func TestSummarizeProgressIncludesStateAndSummary(t *testing.T) {
 func TestManagerResetClearsTasksAndEvents(t *testing.T) {
 	t.Helper()
 
-	manager, err := NewManager("sqlite://" + t.TempDir() + "/agent.db")
+	manager, err := NewManager(testmysql.NewDSN(t))
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
