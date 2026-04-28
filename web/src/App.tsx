@@ -2,11 +2,12 @@ import { AppTopbar } from './components/AppTopbar'
 import { useDashboardState } from './hooks/useDashboardState'
 import { useHashPage } from './hooks/useHashPage'
 import { DashboardPage } from './pages/DashboardPage'
+import { LogsPage } from './pages/LogsPage'
 import { SettingsPage } from './pages/SettingsPage'
 
 export default function App() {
   const page = useHashPage()
-  const { data, setData, loading, error, refresh } = useDashboardState()
+  const { data, setData, loading, error, refresh } = useDashboardState(page !== 'logs')
 
   return (
     <div className="app-shell">
@@ -22,6 +23,8 @@ export default function App() {
           loading={loading}
           setData={setData}
         />
+      ) : page === 'logs' ? (
+        <LogsPage />
       ) : (
         <SettingsPage
           data={data}
@@ -33,4 +36,3 @@ export default function App() {
     </div>
   )
 }
-

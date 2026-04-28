@@ -397,6 +397,26 @@ code {
   border-color: rgba(166, 135, 255, 0.28);
 }
 
+.badge-log-debug,
+.badge-log-info {
+  color: #93fff3;
+  background: rgba(42, 234, 196, 0.14);
+  border-color: rgba(42, 234, 196, 0.32);
+}
+
+.badge-log-warn {
+  color: #ffe7a6;
+  background: rgba(255, 190, 92, 0.14);
+  border-color: rgba(255, 190, 92, 0.32);
+}
+
+.badge-log-error,
+.badge-log-fatal {
+  color: #ffb0c8;
+  background: rgba(255, 112, 162, 0.14);
+  border-color: rgba(255, 112, 162, 0.28);
+}
+
 .timeline-item {
   position: relative;
   display: grid;
@@ -918,6 +938,87 @@ code {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.logs-page {
+  position: relative;
+  margin: 0 auto;
+  max-width: 1360px;
+  display: grid;
+  gap: 20px;
+}
+
+.logs-hero-card {
+  margin-bottom: 0;
+}
+
+.logs-toolbar {
+  display: grid;
+  gap: 16px;
+}
+
+.logs-size-field {
+  min-width: 140px;
+}
+
+.logs-list {
+  display: grid;
+  gap: 14px;
+}
+
+.logs-stream {
+  display: grid;
+  gap: 16px;
+}
+
+.logs-stream-list {
+  display: grid;
+  gap: 0;
+}
+
+.log-row {
+  display: grid;
+  gap: 8px;
+  padding: 14px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.log-row:first-child {
+  border-top: 0;
+}
+
+.log-row-primary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.log-source {
+  color: rgba(237, 242, 255, 0.76);
+  word-break: break-all;
+}
+
+.log-row-message {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: rgba(237, 242, 255, 0.88);
+  line-height: 1.55;
+}
+
+.log-row-raw {
+  display: block;
+  color: rgba(237, 242, 255, 0.46);
+  font-size: 0.84rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+.logs-error-banner {
+  margin: 0 auto;
+  max-width: 1360px;
 }
 
 .insight-card h3 {

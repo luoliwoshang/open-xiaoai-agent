@@ -1,4 +1,4 @@
-import type { DashboardState } from '../types'
+import type { DashboardState, LogPage } from '../types'
 import { normalizeState } from './dashboard'
 
 export async function fetchState() {
@@ -33,4 +33,16 @@ export async function postFormData<T>(url: string, payload: FormData) {
     throw new Error(await response.text())
   }
   return (await response.json()) as T
+}
+
+export async function fetchLogsPage(page: number, pageSize: number) {
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+  })
+  const response = await fetch(`/api/logs?${params.toString()}`, { cache: 'no-store' })
+  if (!response.ok) {
+    throw new Error(await response.text())
+  }
+  return (await response.json()) as LogPage
 }

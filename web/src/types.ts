@@ -134,3 +134,20 @@ export type WeChatLoginStatus = {
   message: string
   candidate?: WeChatLoginCandidate
 }
+
+export type LogEntry = {
+  id: string
+  level: 'debug' | 'info' | 'warn' | 'error' | 'fatal'
+  source: string
+  message: string
+  raw: string
+  created_at: string
+}
+
+export type LogPage = {
+  items: LogEntry[]
+  page: number
+  page_size: number
+  total: number
+  has_more: boolean
+}

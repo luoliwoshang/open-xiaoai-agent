@@ -13,6 +13,7 @@ import (
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/dashboard"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/im"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/llm"
+	runtimelogs "github.com/luoliwoshang/open-xiaoai-agent/internal/logs"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugin"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugins"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugins/complextask"
@@ -44,6 +45,12 @@ func main() {
 		log.Fatal(err)
 	}
 	dsn := appConfig.Database.DSN
+	logStore, err := runtimelogs.NewStore(dsn)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.SetFlags(log.LstdFlags | log.Lmicroseconds | log.Lshortfile)
+	log.SetOutput(runtimelogs.NewRecorder(logStore, os.Stderr))
 	log.Printf("loaded SOUL.md (%d chars)", len(appConfig.Soul))
 	log.Printf("loaded models: intent=%s reply=%s", appConfig.Intent.Model, appConfig.Reply.Model)
 	llmClient := llm.NewClient()
@@ -97,7 +104,7 @@ func main() {
 
 	srv := server.New(cfg, asrService.OnASR)
 	go func() {
-		if err := dashboard.New(*dashboardAddr, taskManager, complexTaskService, asrService, settingsStore, imService).ListenAndServe(); err != nil {
+		if err := dashboard.New(*dashboardAddr, taskManager, complexTaskService, asrService, settingsStore, imService, logStore).ListenAndServe(); err != nil {
 			log.Printf("dashboard stopped: %v", err)
 		}
 	}()

@@ -13,6 +13,7 @@ import (
 
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/assistant"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/im"
+	runtimelogs "github.com/luoliwoshang/open-xiaoai-agent/internal/logs"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugin"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugins/complextask"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/settings"
@@ -68,6 +69,33 @@ type fakeIM struct {
 	debugImage      im.ImageSendRequest
 	debugReceipt    im.DeliveryReceipt
 	resetCalls      int
+}
+
+type fakeLogs struct {
+	lastQuery runtimelogs.ListQuery
+	page      runtimelogs.ListPage
+}
+
+func (f *fakeLogs) List(query runtimelogs.ListQuery) (runtimelogs.ListPage, error) {
+	f.lastQuery = query
+	if f.page.Page == 0 {
+		f.page = runtimelogs.ListPage{
+			Page:     query.Page,
+			PageSize: query.PageSize,
+			Total:    1,
+			HasMore:  false,
+			Items: []runtimelogs.Entry{
+				{
+					ID:      "log_1",
+					Level:   "error",
+					Source:  "assistant/service.go:141",
+					Message: "intent classify failed",
+					Raw:     "2026/04/28 12:00:00.000000 assistant/service.go:141: intent classify failed",
+				},
+			},
+		}
+	}
+	return f.page, nil
 }
 
 func (f *fakeIM) Snapshot() im.Snapshot {
@@ -214,7 +242,7 @@ func TestHandleResetClearsRuntimeData(t *testing.T) {
 	}
 
 	imGateway := &fakeIM{}
-	server := New(":0", manager, claude, conversations, runtimeSettings, imGateway)
+	server := New(":0", manager, claude, conversations, runtimeSettings, imGateway, &fakeLogs{})
 	req := httptest.NewRequest(http.MethodPost, "/api/reset", nil)
 	recorder := httptest.NewRecorder()
 
@@ -245,7 +273,7 @@ func TestHandleResetClearsRuntimeData(t *testing.T) {
 func TestHandleResetRejectsNonPost(t *testing.T) {
 	t.Parallel()
 
-	server := New(":0", nil, nil, &fakeConversations{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeIM{})
+	server := New(":0", nil, nil, &fakeConversations{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeIM{}, &fakeLogs{})
 	req := httptest.NewRequest(http.MethodGet, "/api/reset", nil)
 	recorder := httptest.NewRecorder()
 
@@ -259,7 +287,7 @@ func TestHandleResetRejectsNonPost(t *testing.T) {
 func TestHandleSettingsReturnsSnapshot(t *testing.T) {
 	t.Parallel()
 
-	server := New(":0", nil, nil, nil, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeIM{})
+	server := New(":0", nil, nil, nil, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeIM{}, &fakeLogs{})
 	req := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
 	recorder := httptest.NewRecorder()
 
@@ -284,7 +312,7 @@ func TestHandleSessionSettingsUpdatesWindowSeconds(t *testing.T) {
 	t.Parallel()
 
 	runtimeSettings := &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}
-	server := New(":0", nil, nil, nil, runtimeSettings, &fakeIM{})
+	server := New(":0", nil, nil, nil, runtimeSettings, &fakeIM{}, &fakeLogs{})
 	req := httptest.NewRequest(http.MethodPost, "/api/settings/session", strings.NewReader(`{"window_seconds":420}`))
 	recorder := httptest.NewRecorder()
 
@@ -301,7 +329,7 @@ func TestHandleSessionSettingsUpdatesWindowSeconds(t *testing.T) {
 func TestHandleSessionSettingsRejectsInvalidValue(t *testing.T) {
 	t.Parallel()
 
-	server := New(":0", nil, nil, nil, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeIM{})
+	server := New(":0", nil, nil, nil, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeIM{}, &fakeLogs{})
 	req := httptest.NewRequest(http.MethodPost, "/api/settings/session", strings.NewReader(`{"window_seconds":1}`))
 	recorder := httptest.NewRecorder()
 
@@ -316,7 +344,7 @@ func TestHandleWeChatLoginConfirmPersistsAfterExplicitConfirmation(t *testing.T)
 	t.Parallel()
 
 	imGateway := &fakeIM{}
-	server := New(":0", nil, nil, nil, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, imGateway)
+	server := New(":0", nil, nil, nil, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, imGateway, &fakeLogs{})
 	req := httptest.NewRequest(http.MethodPost, "/api/im/wechat/login/confirm", strings.NewReader(`{"session_key":"sess-1"}`))
 	recorder := httptest.NewRecorder()
 
@@ -348,7 +376,7 @@ func TestHandleIMDebugSendDefaultUsesPostedText(t *testing.T) {
 	t.Parallel()
 
 	imGateway := &fakeIM{}
-	server := New(":0", nil, nil, nil, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, imGateway)
+	server := New(":0", nil, nil, nil, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, imGateway, &fakeLogs{})
 	req := httptest.NewRequest(http.MethodPost, "/api/im/debug/send-default", strings.NewReader(`{"text":"调试消息"}`))
 	recorder := httptest.NewRecorder()
 
@@ -383,7 +411,7 @@ func TestHandleIMDebugSendImageDefaultUsesUploadedFile(t *testing.T) {
 	t.Parallel()
 
 	imGateway := &fakeIM{}
-	server := New(":0", nil, nil, nil, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, imGateway)
+	server := New(":0", nil, nil, nil, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, imGateway, &fakeLogs{})
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
@@ -435,5 +463,51 @@ func TestHandleIMDebugSendImageDefaultUsesUploadedFile(t *testing.T) {
 	}
 	if payload.Receipt.MediaFileName != "rabbit.png" {
 		t.Fatalf("MediaFileName = %q, want rabbit.png", payload.Receipt.MediaFileName)
+	}
+}
+
+func TestHandleLogsReturnsPaginatedEntries(t *testing.T) {
+	t.Parallel()
+
+	logStore := &fakeLogs{}
+	server := New(":0", nil, nil, nil, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeIM{}, logStore)
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?page=2&page_size=25", nil)
+	recorder := httptest.NewRecorder()
+
+	server.handleLogs(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if logStore.lastQuery.Page != 2 {
+		t.Fatalf("Page = %d, want 2", logStore.lastQuery.Page)
+	}
+	if logStore.lastQuery.PageSize != 25 {
+		t.Fatalf("PageSize = %d, want 25", logStore.lastQuery.PageSize)
+	}
+
+	var payload runtimelogs.ListPage
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if len(payload.Items) != 1 {
+		t.Fatalf("len(Items) = %d, want 1", len(payload.Items))
+	}
+	if payload.Items[0].Source != "assistant/service.go:141" {
+		t.Fatalf("Source = %q, want assistant/service.go:141", payload.Items[0].Source)
+	}
+}
+
+func TestHandleLogsRejectsInvalidPage(t *testing.T) {
+	t.Parallel()
+
+	server := New(":0", nil, nil, nil, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeIM{}, &fakeLogs{})
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?page=oops", nil)
+	recorder := httptest.NewRecorder()
+
+	server.handleLogs(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
 	}
 }

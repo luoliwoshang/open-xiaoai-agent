@@ -19,6 +19,9 @@ export function AppTopbar({ page }: Props) {
         <a className={`topbar-link ${page === 'settings' ? 'topbar-link-active' : ''}`} href="#/settings">
           系统设置
         </a>
+        <a className={`topbar-link ${page === 'logs' ? 'topbar-link-active' : ''}`} href="#/logs">
+          后端日志
+        </a>
       </nav>
     </header>
   )
