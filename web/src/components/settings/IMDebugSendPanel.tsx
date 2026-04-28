@@ -5,11 +5,20 @@ type Props = {
   target: IMTarget | null
   configDirty: boolean
   text: string
-  sending: boolean
-  feedback: string | null
-  error: string | null
+  textSending: boolean
+  textFeedback: string | null
+  textError: string | null
+  imageCaption: string
+  imageFileName: string | null
+  imageInputKey: number
+  imageSending: boolean
+  imageFeedback: string | null
+  imageError: string | null
   onTextChange: (value: string) => void
-  onSend: () => void
+  onSendText: () => void
+  onImageCaptionChange: (value: string) => void
+  onImageFileChange: (file: File | null) => void
+  onSendImage: () => void
 }
 
 export function IMDebugSendPanel({
@@ -17,11 +26,20 @@ export function IMDebugSendPanel({
   target,
   configDirty,
   text,
-  sending,
-  feedback,
-  error,
+  textSending,
+  textFeedback,
+  textError,
+  imageCaption,
+  imageFileName,
+  imageInputKey,
+  imageSending,
+  imageFeedback,
+  imageError,
   onTextChange,
-  onSend,
+  onSendText,
+  onImageCaptionChange,
+  onImageFileChange,
+  onSendImage,
 }: Props) {
   const ready = Boolean(account && target)
 
@@ -68,7 +86,7 @@ export function IMDebugSendPanel({
           <span>测试文本</span>
           <textarea
             className="settings-textarea"
-            disabled={!ready || sending}
+            disabled={!ready || textSending}
             placeholder="例如：这是一条默认渠道调试消息。"
             rows={4}
             value={text}
@@ -79,17 +97,59 @@ export function IMDebugSendPanel({
         <div className="settings-actions">
           <button
             className="settings-button"
-            disabled={!ready || sending || !text.trim()}
-            onClick={() => onSend()}
+            disabled={!ready || textSending || !text.trim()}
+            onClick={() => onSendText()}
             type="button"
           >
-            {sending ? '发送中...' : '发送测试消息'}
+            {textSending ? '发送中...' : '发送测试消息'}
           </button>
-          <span className="settings-note">当前阶段只支持文本消息。</span>
+          <span className="settings-note">这条链路会同步验证默认渠道是否真的可用。</span>
         </div>
 
-        {feedback ? <div className="settings-feedback">{feedback}</div> : null}
-        {error ? <div className="error-banner settings-error">{error}</div> : null}
+        {textFeedback ? <div className="settings-feedback">{textFeedback}</div> : null}
+        {textError ? <div className="error-banner settings-error">{textError}</div> : null}
+
+        <label className="settings-field">
+          <span>测试图片</span>
+          <input
+            accept="image/*"
+            className="settings-input"
+            disabled={!ready || imageSending}
+            key={imageInputKey}
+            type="file"
+            onChange={(event) => onImageFileChange(event.target.files?.[0] ?? null)}
+          />
+          <span className="settings-note">
+            {imageFileName ? `已选择：${imageFileName}` : '只接受图片文件，服务端会先落到媒体缓存目录，再按微信协议发送。'}
+          </span>
+        </label>
+
+        <label className="settings-field">
+          <span>图片说明</span>
+          <textarea
+            className="settings-textarea"
+            disabled={!ready || imageSending}
+            placeholder="例如：这是一张默认渠道调试图片。"
+            rows={3}
+            value={imageCaption}
+            onChange={(event) => onImageCaptionChange(event.target.value)}
+          />
+        </label>
+
+        <div className="settings-actions">
+          <button
+            className="settings-button"
+            disabled={!ready || imageSending || !imageFileName}
+            onClick={() => onSendImage()}
+            type="button"
+          >
+            {imageSending ? '发送中...' : '发送测试图片'}
+          </button>
+          <span className="settings-note">如果填写了图片说明，微信侧会先收到一条文字，再收到图片。</span>
+        </div>
+
+        {imageFeedback ? <div className="settings-feedback">{imageFeedback}</div> : null}
+        {imageError ? <div className="error-banner settings-error">{imageError}</div> : null}
       </div>
     </article>
   )

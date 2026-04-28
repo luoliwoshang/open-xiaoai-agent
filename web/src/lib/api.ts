@@ -24,3 +24,13 @@ export async function postJSON<T>(url: string, payload: unknown) {
   return (await response.json()) as T
 }
 
+export async function postFormData<T>(url: string, payload: FormData) {
+  const response = await fetch(url, {
+    method: 'POST',
+    body: payload,
+  })
+  if (!response.ok) {
+    throw new Error(await response.text())
+  }
+  return (await response.json()) as T
+}

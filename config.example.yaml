@@ -1,6 +1,9 @@
 database:
   dsn: root:root@tcp(127.0.0.1:3306)/open_xiaoai_agent
 
+im:
+  media_cache_dir: .cache/im-media
+
 openai:
   base_url: https://api.openai.com/v1
 

@@ -3,7 +3,9 @@ package im
 import "time"
 
 const (
-	PlatformWeChat = "weixin"
+	PlatformWeChat    = "weixin"
+	DeliveryKindText  = "text"
+	DeliveryKindImage = "image"
 )
 
 type Account struct {
@@ -51,10 +53,32 @@ type DeliveryConfig struct {
 }
 
 type DeliveryReceipt struct {
-	Account   Account `json:"account"`
-	Target    Target  `json:"target"`
-	MessageID string  `json:"message_id"`
-	Text      string  `json:"text"`
+	Account       Account `json:"account"`
+	Target        Target  `json:"target"`
+	MessageID     string  `json:"message_id"`
+	Kind          string  `json:"kind"`
+	Text          string  `json:"text,omitempty"`
+	Caption       string  `json:"caption,omitempty"`
+	MediaFileName string  `json:"media_file_name,omitempty"`
+	MediaMimeType string  `json:"media_mime_type,omitempty"`
+}
+
+type PreparedImage struct {
+	FilePath string
+	FileName string
+	MimeType string
+	Size     int64
+}
+
+type ImageSendRequest struct {
+	FileName string
+	MimeType string
+	Content  []byte
+	Caption  string
+}
+
+type ImageSendResult struct {
+	MessageID string
 }
 
 type WeChatLoginStart struct {

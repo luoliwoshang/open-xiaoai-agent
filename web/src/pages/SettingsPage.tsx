@@ -5,7 +5,7 @@ import { IMTargetsPanel } from '../components/settings/IMTargetsPanel'
 import { SessionSettingsPanel } from '../components/settings/SessionSettingsPanel'
 import { WeChatAccountsPanel } from '../components/settings/WeChatAccountsPanel'
 import { WeChatLoginPanel } from '../components/settings/WeChatLoginPanel'
-import { postJSON } from '../lib/api'
+import { postFormData, postJSON } from '../lib/api'
 import { normalizeSettings, selectBestTarget } from '../lib/dashboard'
 import type {
   DashboardState,
@@ -94,9 +94,15 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
   const [deliveryFeedback, setDeliveryFeedback] = useState<string | null>(null)
   const [deliveryError, setDeliveryError] = useState<string | null>(null)
   const [debugText, setDebugText] = useState('')
-  const [debugSending, setDebugSending] = useState(false)
-  const [debugFeedback, setDebugFeedback] = useState<string | null>(null)
-  const [debugError, setDebugError] = useState<string | null>(null)
+  const [debugTextSending, setDebugTextSending] = useState(false)
+  const [debugTextFeedback, setDebugTextFeedback] = useState<string | null>(null)
+  const [debugTextError, setDebugTextError] = useState<string | null>(null)
+  const [debugImageFile, setDebugImageFile] = useState<File | null>(null)
+  const [debugImageCaption, setDebugImageCaption] = useState('')
+  const [debugImageInputKey, setDebugImageInputKey] = useState(0)
+  const [debugImageSending, setDebugImageSending] = useState(false)
+  const [debugImageFeedback, setDebugImageFeedback] = useState<string | null>(null)
+  const [debugImageError, setDebugImageError] = useState<string | null>(null)
 
   const [loginPanel, setLoginPanel] = useState<LoginPanelState>(emptyLoginState)
 
@@ -407,14 +413,14 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
 
   async function sendDebugText() {
     if (!debugText.trim()) {
-      setDebugError('请输入要发送的测试文本。')
-      setDebugFeedback(null)
+      setDebugTextError('请输入要发送的测试文本。')
+      setDebugTextFeedback(null)
       return
     }
 
-    setDebugSending(true)
-    setDebugError(null)
-    setDebugFeedback(null)
+    setDebugTextSending(true)
+    setDebugTextError(null)
+    setDebugTextFeedback(null)
     try {
       const payload = await postJSON<{ receipt?: IMDeliveryReceipt }>('/api/im/debug/send-default', {
         text: debugText,
@@ -422,14 +428,47 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
       await refresh()
       setDebugText('')
       if (payload.receipt) {
-        setDebugFeedback(`测试消息已发送到 ${payload.receipt.account.display_name || payload.receipt.account.remote_account_id} / ${payload.receipt.target.name}。`)
+        setDebugTextFeedback(`测试消息已发送到 ${payload.receipt.account.display_name || payload.receipt.account.remote_account_id} / ${payload.receipt.target.name}。`)
       } else {
-        setDebugFeedback('测试消息发送成功。')
+        setDebugTextFeedback('测试消息发送成功。')
       }
     } catch (err) {
-      setDebugError(err instanceof Error ? err.message : '发送测试消息失败')
+      setDebugTextError(err instanceof Error ? err.message : '发送测试消息失败')
     } finally {
-      setDebugSending(false)
+      setDebugTextSending(false)
+    }
+  }
+
+  async function sendDebugImage() {
+    if (!debugImageFile) {
+      setDebugImageError('请先选择一张图片。')
+      setDebugImageFeedback(null)
+      return
+    }
+
+    const payload = new FormData()
+    payload.set('file', debugImageFile)
+    payload.set('caption', debugImageCaption)
+
+    setDebugImageSending(true)
+    setDebugImageError(null)
+    setDebugImageFeedback(null)
+    try {
+      const result = await postFormData<{ receipt?: IMDeliveryReceipt }>('/api/im/debug/send-image-default', payload)
+      await refresh()
+      setDebugImageFile(null)
+      setDebugImageCaption('')
+      setDebugImageInputKey((current) => current + 1)
+      if (result.receipt) {
+        const label = result.receipt.media_file_name || debugImageFile.name
+        setDebugImageFeedback(`测试图片 ${label} 已发送到 ${result.receipt.account.display_name || result.receipt.account.remote_account_id} / ${result.receipt.target.name}。`)
+      } else {
+        setDebugImageFeedback('测试图片发送成功。')
+      }
+    } catch (err) {
+      setDebugImageError(err instanceof Error ? err.message : '发送测试图片失败')
+    } finally {
+      setDebugImageSending(false)
     }
   }
 
@@ -552,16 +591,33 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
               <IMDebugSendPanel
                 account={savedDebugAccount}
                 configDirty={deliveryDirty}
-                error={debugError}
-                feedback={debugFeedback}
-                sending={debugSending}
+                imageCaption={debugImageCaption}
+                imageError={debugImageError}
+                imageFeedback={debugImageFeedback}
+                imageFileName={debugImageFile?.name ?? null}
+                imageInputKey={debugImageInputKey}
+                imageSending={debugImageSending}
                 target={savedDebugTarget}
                 text={debugText}
-                onSend={() => void sendDebugText()}
+                textError={debugTextError}
+                textFeedback={debugTextFeedback}
+                textSending={debugTextSending}
+                onImageCaptionChange={(value) => {
+                  setDebugImageCaption(value)
+                  setDebugImageFeedback(null)
+                  setDebugImageError(null)
+                }}
+                onImageFileChange={(file) => {
+                  setDebugImageFile(file)
+                  setDebugImageFeedback(null)
+                  setDebugImageError(null)
+                }}
+                onSendImage={() => void sendDebugImage()}
+                onSendText={() => void sendDebugText()}
                 onTextChange={(value) => {
                   setDebugText(value)
-                  setDebugFeedback(null)
-                  setDebugError(null)
+                  setDebugTextFeedback(null)
+                  setDebugTextError(null)
                 }}
               />
 

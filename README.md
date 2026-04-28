@@ -78,7 +78,7 @@ flowchart TD
 - 提供独立的 React + Vite dashboard
 - 使用 MySQL 保存任务、会话和插件私有状态
 - 会话上下文默认使用滑动窗口，并支持在 Dashboard 中调整窗口秒数
-- 提供第一期独立 IM Gateway：支持微信扫码登录、确认添加账号、多账号管理、文本触达配置和默认渠道调试发送
+- 提供第一期独立 IM Gateway：支持微信扫码登录、确认添加账号、多账号管理、文本触达配置，以及默认渠道的文本 / 图片调试发送
 - 支持把小爱的正常回复异步镜像到选中的微信私聊目标，不阻塞设备侧播报
 
 当前内置工具：
@@ -145,11 +145,15 @@ reply:
   model: qwen-turbo
   base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
   api_key: sk-reply-placeholder
+
+im:
+  media_cache_dir: .cache/im-media
 ```
 
 `SOUL.md` 会在启动时一并读取，用于定义主回复的人设。`config.yaml` 已被忽略，不要提交真实密钥。
 
 `database.dsn` 是当前唯一的数据库配置入口，启动时会直接从 `config.yaml` 读取。
+`im.media_cache_dir` 用于缓存上传到 IM 网关的图片文件；默认值是仓库根目录下的 `.cache/im-media`，当前不会自动清理。
 
 3. 启动本地 MySQL：
 

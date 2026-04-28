@@ -1,8 +1,10 @@
 package dashboard
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -63,6 +65,7 @@ type fakeIM struct {
 	confirmAccount  im.Account
 	confirmSession  string
 	debugText       string
+	debugImage      im.ImageSendRequest
 	debugReceipt    im.DeliveryReceipt
 	resetCalls      int
 }
@@ -115,6 +118,29 @@ func (f *fakeIM) SendTextToDefaultChannel(text string) (im.DeliveryReceipt, erro
 		}
 	}
 	return f.debugReceipt, nil
+}
+
+func (f *fakeIM) SendImageToDefaultChannel(req im.ImageSendRequest) (im.DeliveryReceipt, error) {
+	f.debugImage = req
+	return im.DeliveryReceipt{
+		Account: im.Account{
+			ID:              "account_1",
+			Platform:        im.PlatformWeChat,
+			RemoteAccountID: "bot@im.bot",
+			DisplayName:     "bot@im.bot",
+		},
+		Target: im.Target{
+			ID:           "target_1",
+			AccountID:    "account_1",
+			Name:         "我的微信",
+			TargetUserID: "user@im.wechat",
+		},
+		MessageID:     "img_1",
+		Kind:          im.DeliveryKindImage,
+		Caption:       req.Caption,
+		MediaFileName: req.FileName,
+		MediaMimeType: req.MimeType,
+	}, nil
 }
 
 func (f *fakeIM) UpsertTarget(accountID string, name string, targetUserID string, setDefault bool) (im.Target, error) {
@@ -350,5 +376,64 @@ func TestHandleIMDebugSendDefaultUsesPostedText(t *testing.T) {
 	}
 	if payload.Receipt.Text != "调试消息" {
 		t.Fatalf("Text = %q, want 调试消息", payload.Receipt.Text)
+	}
+}
+
+func TestHandleIMDebugSendImageDefaultUsesUploadedFile(t *testing.T) {
+	t.Parallel()
+
+	imGateway := &fakeIM{}
+	server := New(":0", nil, nil, nil, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, imGateway)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	fileWriter, err := writer.CreateFormFile("file", "rabbit.png")
+	if err != nil {
+		t.Fatalf("CreateFormFile() error = %v", err)
+	}
+	if _, err := fileWriter.Write([]byte("png-data")); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if err := writer.WriteField("caption", "测试图片"); err != nil {
+		t.Fatalf("WriteField() error = %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/im/debug/send-image-default", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	recorder := httptest.NewRecorder()
+
+	server.handleIMDebugSendImageDefault(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if imGateway.debugImage.FileName != "rabbit.png" {
+		t.Fatalf("FileName = %q, want rabbit.png", imGateway.debugImage.FileName)
+	}
+	if string(imGateway.debugImage.Content) != "png-data" {
+		t.Fatalf("Content = %q, want png-data", string(imGateway.debugImage.Content))
+	}
+	if imGateway.debugImage.Caption != "测试图片" {
+		t.Fatalf("Caption = %q, want 测试图片", imGateway.debugImage.Caption)
+	}
+
+	var payload struct {
+		OK      bool               `json:"ok"`
+		Receipt im.DeliveryReceipt `json:"receipt"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if !payload.OK {
+		t.Fatal("OK = false, want true")
+	}
+	if payload.Receipt.Kind != im.DeliveryKindImage {
+		t.Fatalf("Kind = %q, want %q", payload.Receipt.Kind, im.DeliveryKindImage)
+	}
+	if payload.Receipt.MediaFileName != "rabbit.png" {
+		t.Fatalf("MediaFileName = %q, want rabbit.png", payload.Receipt.MediaFileName)
 	}
 }

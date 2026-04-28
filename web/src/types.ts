@@ -108,7 +108,11 @@ export type IMDeliveryReceipt = {
   account: IMAccount
   target: IMTarget
   message_id: string
-  text: string
+  kind: 'text' | 'image'
+  text?: string
+  caption?: string
+  media_file_name?: string
+  media_mime_type?: string
 }
 
 export type WeChatLoginStart = {
