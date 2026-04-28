@@ -24,10 +24,22 @@ export type TaskEvent = {
 export type DashboardState = {
   tasks: Task[]
   events: TaskEvent[]
+  artifacts: TaskArtifact[]
   claude_records: ClaudeRecord[]
   conversations: ConversationSnapshot[]
   settings: SettingsSnapshot
   im: IMSnapshot
+}
+
+export type TaskArtifact = {
+  id: string
+  task_id: string
+  kind: string
+  file_name: string
+  mime_type: string
+  size_bytes: number
+  deliver: boolean
+  created_at: string
 }
 
 export type SettingsSnapshot = {

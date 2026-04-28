@@ -11,6 +11,7 @@ export type Page = 'dashboard' | 'settings' | 'logs'
 export const emptyState: DashboardState = {
   tasks: [],
   events: [],
+  artifacts: [],
   claude_records: [],
   conversations: [],
   settings: {
@@ -47,6 +48,19 @@ export function formatTime(value: string) {
   }).format(date)
 }
 
+export function formatBytes(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let size = value
+  let unitIndex = 0
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024
+    unitIndex += 1
+  }
+  const digits = size >= 10 || unitIndex === 0 ? 0 : 1
+  return `${size.toFixed(digits)} ${units[unitIndex]}`
+}
+
 export function countByState(tasks: Task[], state: TaskState) {
   return tasks.filter((task) => task.state === state).length
 }
@@ -75,6 +89,7 @@ export function normalizeState(raw: Partial<DashboardState> | undefined): Dashbo
   return {
     tasks: raw?.tasks ?? [],
     events: raw?.events ?? [],
+    artifacts: raw?.artifacts ?? [],
     claude_records: raw?.claude_records ?? [],
     conversations: (raw?.conversations ?? []).map((conversation) => ({
       ...conversation,

@@ -1,6 +1,9 @@
 database:
   dsn: root:root@tcp(127.0.0.1:3306)/open_xiaoai_agent
 
+task:
+  artifact_cache_dir: .cache/task-artifacts
+
 im:
   media_cache_dir: .cache/im-media
 

@@ -19,6 +19,9 @@ type FileConfig struct {
 	Database struct {
 		DSN string `yaml:"dsn"`
 	} `yaml:"database"`
+	Task struct {
+		ArtifactCacheDir string `yaml:"artifact_cache_dir"`
+	} `yaml:"task"`
 	IM struct {
 		MediaCacheDir string `yaml:"media_cache_dir"`
 	} `yaml:"im"`
@@ -72,6 +75,17 @@ func (c *AppConfig) normalize(rootDir string) error {
 	if c.Database.DSN == "" {
 		return fmt.Errorf("database.dsn is required")
 	}
+	c.Task.ArtifactCacheDir = strings.TrimSpace(c.Task.ArtifactCacheDir)
+	if c.Task.ArtifactCacheDir == "" {
+		c.Task.ArtifactCacheDir = filepath.Join(rootDir, ".cache", "task-artifacts")
+	} else if !filepath.IsAbs(c.Task.ArtifactCacheDir) {
+		c.Task.ArtifactCacheDir = filepath.Join(rootDir, c.Task.ArtifactCacheDir)
+	}
+	absTaskArtifactCacheDir, err := filepath.Abs(c.Task.ArtifactCacheDir)
+	if err != nil {
+		return fmt.Errorf("resolve task.artifact_cache_dir: %w", err)
+	}
+	c.Task.ArtifactCacheDir = absTaskArtifactCacheDir
 	c.IM.MediaCacheDir = strings.TrimSpace(c.IM.MediaCacheDir)
 	if c.IM.MediaCacheDir == "" {
 		c.IM.MediaCacheDir = filepath.Join(rootDir, ".cache", "im-media")

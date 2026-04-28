@@ -29,6 +29,16 @@ func (f *fakeReporter) Event(eventType string, message string) error {
 	return nil
 }
 
+func (f *fakeReporter) PutArtifact(req plugin.PutArtifactRequest) (plugin.ArtifactRef, error) {
+	_ = req
+	return plugin.ArtifactRef{}, nil
+}
+
+func (f *fakeReporter) SetDeliverArtifacts(ids []string) error {
+	_ = ids
+	return nil
+}
+
 func TestStreamParserHandlesClaudeOutput(t *testing.T) {
 	t.Parallel()
 
