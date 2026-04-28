@@ -439,6 +439,7 @@ Important routes:
 - `POST /api/settings/im-delivery`
 - `POST /api/im/wechat/login/start`
 - `GET /api/im/wechat/login/status`
+- `POST /api/im/wechat/login/confirm`
 - `POST /api/im/targets`
 - `POST /api/im/targets/default`
 - `POST /api/im/targets/delete`

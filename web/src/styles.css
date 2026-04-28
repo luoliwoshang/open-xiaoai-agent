@@ -797,9 +797,38 @@ code {
   grid-column: 1 / -1;
 }
 
+.settings-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(2, 6, 15, 0.72);
+  backdrop-filter: blur(16px);
+}
+
+.settings-modal-card {
+  width: min(860px, 100%);
+  max-height: min(92vh, 920px);
+  overflow: auto;
+  padding: 24px;
+  border-radius: 28px;
+  backdrop-filter: blur(18px);
+  background: rgba(8, 13, 24, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.4);
+}
+
 .settings-login-grid {
   display: grid;
   grid-template-columns: minmax(240px, 280px) minmax(0, 1fr);
+  gap: 18px;
+}
+
+.settings-login-confirm {
+  display: grid;
   gap: 18px;
 }
 

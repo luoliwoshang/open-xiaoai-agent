@@ -12,9 +12,11 @@ import (
 )
 
 type stubAdapter struct {
-	mu       sync.Mutex
-	sendErr  error
-	messages []string
+	mu          sync.Mutex
+	sendErr     error
+	loginErr    error
+	loginResult WeChatLoginResult
+	messages    []string
 }
 
 func (s *stubAdapter) Platform() string {
@@ -26,7 +28,10 @@ func (s *stubAdapter) StartLogin(ctx context.Context) (WeChatLoginStart, error) 
 }
 
 func (s *stubAdapter) PollLogin(ctx context.Context, sessionKey string) (WeChatLoginResult, error) {
-	return WeChatLoginResult{}, nil
+	if s.loginErr != nil {
+		return WeChatLoginResult{}, s.loginErr
+	}
+	return s.loginResult, nil
 }
 
 func (s *stubAdapter) SendText(ctx context.Context, account Account, target Target, text string) (TextSendResult, error) {
@@ -79,6 +84,75 @@ func TestServiceUpdateDeliveryConfigPersistsSelection(t *testing.T) {
 	}
 	if snapshot.IMSelectedTargetID != target.ID {
 		t.Fatalf("IMSelectedTargetID = %q, want %q", snapshot.IMSelectedTargetID, target.ID)
+	}
+}
+
+func TestServiceConfirmWeChatLoginPersistsAccountAfterExplicitConfirmation(t *testing.T) {
+	t.Parallel()
+
+	dsn := testmysql.NewDSN(t)
+	settingsStore, err := settings.NewStore(dsn)
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	service, err := NewService(dsn, settingsStore)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	adapter := &stubAdapter{
+		loginResult: WeChatLoginResult{
+			Status:          "confirmed",
+			Message:         "微信账号登录成功。",
+			RemoteAccountID: "bot@im.bot",
+			OwnerUserID:     "user@im.wechat",
+			BaseURL:         "https://example.com",
+			Token:           "token",
+		},
+	}
+	service.adapters[PlatformWeChat] = adapter
+
+	status, err := service.PollWeChatLogin("session-1")
+	if err != nil {
+		t.Fatalf("PollWeChatLogin() error = %v", err)
+	}
+	if status.Status != "confirmed" {
+		t.Fatalf("status = %q, want confirmed", status.Status)
+	}
+	if status.Candidate == nil {
+		t.Fatal("Candidate = nil, want candidate data")
+	}
+
+	accounts, err := service.store.ListAccounts()
+	if err != nil {
+		t.Fatalf("ListAccounts() error = %v", err)
+	}
+	if len(accounts) != 0 {
+		t.Fatalf("ListAccounts() len = %d, want 0 before confirmation", len(accounts))
+	}
+
+	account, err := service.ConfirmWeChatLogin("session-1")
+	if err != nil {
+		t.Fatalf("ConfirmWeChatLogin() error = %v", err)
+	}
+	if account.RemoteAccountID != "bot@im.bot" {
+		t.Fatalf("RemoteAccountID = %q, want bot@im.bot", account.RemoteAccountID)
+	}
+
+	accounts, err = service.store.ListAccounts()
+	if err != nil {
+		t.Fatalf("ListAccounts() error = %v", err)
+	}
+	if len(accounts) != 1 {
+		t.Fatalf("ListAccounts() len = %d, want 1 after confirmation", len(accounts))
+	}
+
+	targets, err := service.store.ListTargets()
+	if err != nil {
+		t.Fatalf("ListTargets() error = %v", err)
+	}
+	if len(targets) != 1 {
+		t.Fatalf("ListTargets() len = %d, want 1 auto-created owner target", len(targets))
 	}
 }
 

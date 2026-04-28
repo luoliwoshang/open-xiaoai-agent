@@ -111,8 +111,15 @@ export type WeChatLoginStart = {
   expires_at: string
 }
 
+export type WeChatLoginCandidate = {
+  remote_account_id: string
+  owner_user_id: string
+  display_name: string
+  base_url: string
+}
+
 export type WeChatLoginStatus = {
   status: 'pending' | 'scanned' | 'confirmed' | 'expired' | 'failed'
   message: string
-  account?: IMAccount
+  candidate?: WeChatLoginCandidate
 }

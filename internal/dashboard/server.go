@@ -29,6 +29,7 @@ type Server struct {
 		Snapshot() im.Snapshot
 		StartWeChatLogin() (im.WeChatLoginStart, error)
 		PollWeChatLogin(sessionKey string) (im.WeChatLoginStatus, error)
+		ConfirmWeChatLogin(sessionKey string) (im.Account, error)
 		UpsertTarget(accountID string, name string, targetUserID string, setDefault bool) (im.Target, error)
 		SetDefaultTarget(accountID string, targetID string) error
 		DeleteTarget(targetID string) error
@@ -48,6 +49,7 @@ func New(addr string, tasks *tasks.Manager, claude *complextask.Service, convers
 	Snapshot() im.Snapshot
 	StartWeChatLogin() (im.WeChatLoginStart, error)
 	PollWeChatLogin(sessionKey string) (im.WeChatLoginStatus, error)
+	ConfirmWeChatLogin(sessionKey string) (im.Account, error)
 	UpsertTarget(accountID string, name string, targetUserID string, setDefault bool) (im.Target, error)
 	SetDefaultTarget(accountID string, targetID string) error
 	DeleteTarget(targetID string) error
@@ -74,6 +76,7 @@ func (s *Server) ListenAndServe() error {
 	mux.HandleFunc("/api/settings/im-delivery", s.handleIMDeliverySettings)
 	mux.HandleFunc("/api/im/wechat/login/start", s.handleWeChatLoginStart)
 	mux.HandleFunc("/api/im/wechat/login/status", s.handleWeChatLoginStatus)
+	mux.HandleFunc("/api/im/wechat/login/confirm", s.handleWeChatLoginConfirm)
 	mux.HandleFunc("/api/im/targets", s.handleIMTargets)
 	mux.HandleFunc("/api/im/targets/default", s.handleIMTargetDefault)
 	mux.HandleFunc("/api/im/targets/delete", s.handleIMTargetDelete)
@@ -239,6 +242,36 @@ func (s *Server) handleWeChatLoginStatus(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, map[string]any{
 		"ok":     true,
 		"status": status,
+	})
+}
+
+func (s *Server) handleWeChatLoginConfirm(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.im == nil {
+		http.Error(w, "im gateway is not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	var payload struct {
+		SessionKey string `json:"session_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, fmt.Sprintf("decode wechat login confirm payload: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	account, err := s.im.ConfirmWeChatLogin(payload.SessionKey)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"ok":      true,
+		"account": account,
 	})
 }
 

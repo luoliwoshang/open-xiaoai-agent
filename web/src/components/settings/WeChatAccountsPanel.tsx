@@ -3,10 +3,12 @@ import type { IMAccount } from '../../types'
 
 type Props = {
   accounts: IMAccount[]
+  loginBusy: boolean
+  onStartLogin: () => void
   onDeleteAccount: (accountID: string) => void
 }
 
-export function WeChatAccountsPanel({ accounts, onDeleteAccount }: Props) {
+export function WeChatAccountsPanel({ accounts, loginBusy, onStartLogin, onDeleteAccount }: Props) {
   return (
     <article className="panel settings-panel panel-wide">
       <div className="panel-head compact">
@@ -14,6 +16,9 @@ export function WeChatAccountsPanel({ accounts, onDeleteAccount }: Props) {
           <p className="eyebrow">WECHAT ACCOUNTS</p>
           <h3>账号管理</h3>
         </div>
+        <button className="settings-button" disabled={loginBusy} onClick={() => onStartLogin()} type="button">
+          {loginBusy ? '登录流程进行中...' : '新增微信账号'}
+        </button>
       </div>
 
       <div className="account-grid">
@@ -61,4 +66,3 @@ export function WeChatAccountsPanel({ accounts, onDeleteAccount }: Props) {
     </article>
   )
 }
-
