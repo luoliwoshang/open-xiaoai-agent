@@ -15,6 +15,15 @@ import type {
   WeChatLoginStatus,
 } from '../types'
 
+type SettingsSectionKey = 'system' | 'im'
+
+type SettingsSection = {
+  key: SettingsSectionKey
+  eyebrow: string
+  title: string
+  description: string
+}
+
 type LoginPanelState = {
   loading: boolean
   polling: boolean
@@ -39,6 +48,21 @@ const emptyLoginState: LoginPanelState = {
   error: null,
 }
 
+const settingsSections: SettingsSection[] = [
+  {
+    key: 'system',
+    eyebrow: 'SYSTEM',
+    title: '系统设置',
+    description: '管理会话窗口和全局运行期行为，适合放置 Agent 的基础配置。',
+  },
+  {
+    key: 'im',
+    eyebrow: 'IM GATEWAY',
+    title: 'IM 配置',
+    description: '单独管理微信登录、账号、触达目标和回复镜像，不再与系统设置混排。',
+  },
+]
+
 type Props = {
   data: DashboardState
   error: string | null
@@ -47,6 +71,7 @@ type Props = {
 }
 
 export function SettingsPage({ data, error, setData, refresh }: Props) {
+  const [activeSection, setActiveSection] = useState<SettingsSectionKey>('system')
   const [windowInput, setWindowInput] = useState('300')
   const [windowDirty, setWindowDirty] = useState(false)
   const [settingsSaving, setSettingsSaving] = useState(false)
@@ -155,6 +180,10 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
   const targetFormTargets = useMemo(() => {
     return data.im.targets.filter((target) => target.account_id === targetAccountID)
   }, [data.im.targets, targetAccountID])
+
+  const currentSection = useMemo(() => {
+    return settingsSections.find((section) => section.key === activeSection) ?? settingsSections[0]
+  }, [activeSection])
 
   async function saveSessionWindowSettings() {
     const nextValue = Number(windowInput)
@@ -316,21 +345,21 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
     <main className="settings-page">
       <section className="settings-hero-card">
         <div>
-          <p className="eyebrow">SYSTEM SETTINGS</p>
-          <h2>IM Gateway 与系统设置</h2>
+          <p className="eyebrow">SETTINGS CENTER</p>
+          <h2>把设置拆成清晰的配置域</h2>
           <p className="hero-text">
-            这里单独负责运行期设置和微信账号管理。第一期只做微信文本触达：
-            小爱的回复在设备播报成功后，会异步再镜像到你选中的微信目标。
+            设置页不再把所有配置堆成一个长滚动页面，而是按配置域分开管理。
+            左侧菜单负责切换，右侧只展示当前配置域的内容，让系统设置和 IM 配置各自独立。
           </p>
         </div>
         <div className="settings-hero-stats">
           <div className="metric-card metric-mint">
-            <span>微信账号</span>
-            <strong>{data.im.accounts.length}</strong>
+            <span>配置域</span>
+            <strong>{settingsSections.length}</strong>
           </div>
           <div className="metric-card metric-cyan">
-            <span>触达目标</span>
-            <strong>{data.im.targets.length}</strong>
+            <span>微信账号</span>
+            <strong>{data.im.accounts.length}</strong>
           </div>
           <div className="metric-card metric-amber">
             <span>镜像状态</span>
@@ -341,96 +370,137 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
 
       {error ? <div className="error-banner">接口异常：{error}</div> : null}
 
-      <section className="settings-grid-page">
-        <SessionSettingsPanel
-          settingsError={settingsError}
-          settingsFeedback={settingsFeedback}
-          settingsSaving={settingsSaving}
-          windowDirty={windowDirty}
-          windowInput={windowInput}
-          onSave={() => void saveSessionWindowSettings()}
-          onWindowInputChange={(value) => {
-            setWindowInput(value)
-            setWindowDirty(true)
-            setSettingsFeedback(null)
-            setSettingsError(null)
-          }}
-        />
+      <section className="settings-workspace">
+        <aside className="panel settings-nav-card">
+          <div className="panel-head compact">
+            <div>
+              <p className="eyebrow">SETTINGS MAP</p>
+              <h3>配置导航</h3>
+            </div>
+          </div>
 
-        <IMDeliveryPanel
-          accountID={deliveryAccountID}
-          accounts={data.im.accounts}
-          dirty={deliveryDirty}
-          enabled={deliveryEnabled}
-          error={deliveryError}
-          feedback={deliveryFeedback}
-          saving={deliverySaving}
-          targetID={deliveryTargetID}
-          targets={deliveryTargets}
-          onAccountChange={(value) => {
-            setDeliveryAccountID(value)
-            setDeliveryTargetID(selectBestTarget(data.im.targets, value))
-            setDeliveryDirty(true)
-            setDeliveryFeedback(null)
-            setDeliveryError(null)
-          }}
-          onEnabledChange={(value) => {
-            setDeliveryEnabled(value)
-            setDeliveryDirty(true)
-            setDeliveryFeedback(null)
-            setDeliveryError(null)
-          }}
-          onSave={() => void saveDeliverySettings()}
-          onTargetChange={(value) => {
-            setDeliveryTargetID(value)
-            setDeliveryDirty(true)
-            setDeliveryFeedback(null)
-            setDeliveryError(null)
-          }}
-        />
+          <div className="settings-nav-list">
+            {settingsSections.map((section) => (
+              <button
+                key={section.key}
+                className={`settings-nav-item ${section.key === activeSection ? 'settings-nav-item-active' : ''}`}
+                onClick={() => setActiveSection(section.key)}
+                type="button"
+              >
+                <span>{section.eyebrow}</span>
+                <strong>{section.title}</strong>
+                <p>{section.description}</p>
+              </button>
+            ))}
+          </div>
+        </aside>
 
-        <WeChatLoginPanel
-          error={loginPanel.error}
-          expiresAt={loginPanel.expiresAt}
-          loading={loginPanel.loading}
-          message={loginPanel.message}
-          polling={loginPanel.polling}
-          qrDataUrl={loginPanel.qrDataUrl}
-          qrRawText={loginPanel.qrRawText}
-          onStart={() => void startWeChatLogin()}
-        />
+        <div className="settings-stage">
+          <section className="panel settings-stage-card">
+            <div className="panel-head compact">
+              <div>
+                <p className="eyebrow">{currentSection.eyebrow}</p>
+                <h3>{currentSection.title}</h3>
+              </div>
+            </div>
+            <p className="settings-stage-copy">{currentSection.description}</p>
+          </section>
 
-        <WeChatAccountsPanel
-          accounts={data.im.accounts}
-          onDeleteAccount={(accountID) => void deleteAccount(accountID)}
-        />
+          {activeSection === 'system' ? (
+            <section className="settings-grid-page settings-grid-single">
+              <SessionSettingsPanel
+                settingsError={settingsError}
+                settingsFeedback={settingsFeedback}
+                settingsSaving={settingsSaving}
+                windowDirty={windowDirty}
+                windowInput={windowInput}
+                onSave={() => void saveSessionWindowSettings()}
+                onWindowInputChange={(value) => {
+                  setWindowInput(value)
+                  setWindowDirty(true)
+                  setSettingsFeedback(null)
+                  setSettingsError(null)
+                }}
+              />
+            </section>
+          ) : (
+            <section className="settings-grid-page">
+              <IMDeliveryPanel
+                accountID={deliveryAccountID}
+                accounts={data.im.accounts}
+                dirty={deliveryDirty}
+                enabled={deliveryEnabled}
+                error={deliveryError}
+                feedback={deliveryFeedback}
+                saving={deliverySaving}
+                targetID={deliveryTargetID}
+                targets={deliveryTargets}
+                onAccountChange={(value) => {
+                  setDeliveryAccountID(value)
+                  setDeliveryTargetID(selectBestTarget(data.im.targets, value))
+                  setDeliveryDirty(true)
+                  setDeliveryFeedback(null)
+                  setDeliveryError(null)
+                }}
+                onEnabledChange={(value) => {
+                  setDeliveryEnabled(value)
+                  setDeliveryDirty(true)
+                  setDeliveryFeedback(null)
+                  setDeliveryError(null)
+                }}
+                onSave={() => void saveDeliverySettings()}
+                onTargetChange={(value) => {
+                  setDeliveryTargetID(value)
+                  setDeliveryDirty(true)
+                  setDeliveryFeedback(null)
+                  setDeliveryError(null)
+                }}
+              />
 
-        <IMTargetsPanel
-          accountID={targetAccountID}
-          accountTargets={targetFormTargets}
-          accounts={data.im.accounts}
-          error={targetError}
-          feedback={targetFeedback}
-          name={targetName}
-          saving={targetSaving}
-          setDefault={targetDefault}
-          targetUserID={targetUserID}
-          onAccountChange={(value) => {
-            setTargetAccountID(value)
-            setTargetFeedback(null)
-            setTargetError(null)
-          }}
-          onDeleteTarget={(targetID) => void deleteTarget(targetID)}
-          onNameChange={setTargetName}
-          onSave={() => void createTarget()}
-          onSetDefaultChange={setTargetDefault}
-          onSetDefaultTarget={(accountID, targetID) => void setDefaultTarget(accountID, targetID)}
-          onTargetUserIDChange={setTargetUserID}
-        />
+              <WeChatLoginPanel
+                error={loginPanel.error}
+                expiresAt={loginPanel.expiresAt}
+                loading={loginPanel.loading}
+                message={loginPanel.message}
+                polling={loginPanel.polling}
+                qrDataUrl={loginPanel.qrDataUrl}
+                qrRawText={loginPanel.qrRawText}
+                onStart={() => void startWeChatLogin()}
+              />
 
-        <IMEventsPanel events={data.im.events} />
+              <WeChatAccountsPanel
+                accounts={data.im.accounts}
+                onDeleteAccount={(accountID) => void deleteAccount(accountID)}
+              />
+
+              <IMTargetsPanel
+                accountID={targetAccountID}
+                accountTargets={targetFormTargets}
+                accounts={data.im.accounts}
+                error={targetError}
+                feedback={targetFeedback}
+                name={targetName}
+                saving={targetSaving}
+                setDefault={targetDefault}
+                targetUserID={targetUserID}
+                onAccountChange={(value) => {
+                  setTargetAccountID(value)
+                  setTargetFeedback(null)
+                  setTargetError(null)
+                }}
+                onDeleteTarget={(targetID) => void deleteTarget(targetID)}
+                onNameChange={setTargetName}
+                onSave={() => void createTarget()}
+                onSetDefaultChange={setTargetDefault}
+                onSetDefaultTarget={(accountID, targetID) => void setDefaultTarget(accountID, targetID)}
+                onTargetUserIDChange={setTargetUserID}
+              />
+
+              <IMEventsPanel events={data.im.events} />
+            </section>
+          )}
+        </div>
       </section>
     </main>
   )
 }
-
