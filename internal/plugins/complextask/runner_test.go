@@ -2,6 +2,10 @@ package complextask
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -10,9 +14,12 @@ import (
 )
 
 type fakeReporter struct {
-	taskID  string
-	updates []string
-	events  []string
+	taskID      string
+	updates     []string
+	events      []string
+	artifacts   []plugin.ArtifactRef
+	deliverIDs  []string
+	artifactSeq int
 }
 
 func (f *fakeReporter) TaskID() string {
@@ -30,12 +37,29 @@ func (f *fakeReporter) Event(eventType string, message string) error {
 }
 
 func (f *fakeReporter) PutArtifact(req plugin.PutArtifactRequest) (plugin.ArtifactRef, error) {
-	_ = req
-	return plugin.ArtifactRef{}, nil
+	f.artifactSeq++
+	if closer, ok := req.Reader.(io.Closer); ok {
+		defer closer.Close()
+	}
+	if req.Reader != nil {
+		if _, err := io.ReadAll(req.Reader); err != nil {
+			return plugin.ArtifactRef{}, err
+		}
+	}
+	ref := plugin.ArtifactRef{
+		ID:       fmt.Sprintf("artifact_%d", f.artifactSeq),
+		TaskID:   f.taskID,
+		Kind:     req.Kind,
+		FileName: req.Name,
+		MIMEType: req.MIMEType,
+		Size:     req.Size,
+	}
+	f.artifacts = append(f.artifacts, ref)
+	return ref, nil
 }
 
 func (f *fakeReporter) SetDeliverArtifacts(ids []string) error {
-	_ = ids
+	f.deliverIDs = append([]string(nil), ids...)
 	return nil
 }
 
@@ -108,14 +132,14 @@ func TestStreamParserHandlesClaudeOutput(t *testing.T) {
 func TestBuildClaudePrompt(t *testing.T) {
 	t.Parallel()
 
-	prompt := buildClaudePrompt("帮我做一个网页")
+	prompt := buildClaudePrompt("task_1", "帮我做一个网页")
 	for _, expected := range []string{
 		"执行以下任务：帮我做一个网页",
 		"进度汇报要相对简短",
 		"不要使用特殊符号、emoji、Markdown 列表、代码块",
 		"如果任务还没有真正结束，不要提前说已经完成",
-		"最终总结也要简短精炼",
-		"尽量控制在 2 到 4 句",
+		".open-xiaoai-agent/artifacts/task_1.json",
+		"这个 JSON 文件只负责声明交付产物位置和元数据",
 	} {
 		if !strings.Contains(prompt, expected) {
 			t.Fatalf("buildClaudePrompt() missing %q in %q", expected, prompt)
@@ -126,12 +150,12 @@ func TestBuildClaudePrompt(t *testing.T) {
 func TestBuildClaudeResumePrompt(t *testing.T) {
 	t.Parallel()
 
-	prompt := buildClaudeResumePrompt("把刚刚那个网页再加一个按钮")
+	prompt := buildClaudeResumePrompt("task_2", "把刚刚那个网页再加一个按钮")
 	for _, expected := range []string{
 		"继续基于刚才已经完成的同一个任务接着处理",
 		"补充要求如下：把刚刚那个网页再加一个按钮",
 		"把这次输入视为对上一个任务的补充、修改或追加要求",
-		"最终总结也要简短精炼",
+		".open-xiaoai-agent/artifacts/task_2.json",
 	} {
 		if !strings.Contains(prompt, expected) {
 			t.Fatalf("buildClaudeResumePrompt() missing %q in %q", expected, prompt)
@@ -146,6 +170,103 @@ func TestSummarizeProgressText(t *testing.T) {
 	got := summarizeProgressText(text)
 	if got != "我来帮你在桌面创建一个包含小故事的 txt 文件。" {
 		t.Fatalf("summarizeProgressText() = %q", got)
+	}
+}
+
+func TestImportArtifactsFromManifest(t *testing.T) {
+	t.Parallel()
+
+	cwd := t.TempDir()
+	outputDir := filepath.Join(cwd, "outputs", "rabbit-game")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	indexPath := filepath.Join(outputDir, "index.html")
+	if err := os.WriteFile(indexPath, []byte("<html>rabbit</html>"), 0o644); err != nil {
+		t.Fatalf("WriteFile(index) error = %v", err)
+	}
+	readmePath := filepath.Join(outputDir, "README.txt")
+	if err := os.WriteFile(readmePath, []byte("hello"), 0o644); err != nil {
+		t.Fatalf("WriteFile(readme) error = %v", err)
+	}
+
+	manifestDir := filepath.Join(cwd, ".open-xiaoai-agent", "artifacts")
+	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(manifest) error = %v", err)
+	}
+	manifestPath := filepath.Join(manifestDir, "task_1.json")
+	manifest := artifactManifest{
+		Deliver: []artifactManifestEntry{
+			{
+				Path:     "outputs/rabbit-game/index.html",
+				Name:     "rabbit-game.html",
+				Kind:     "file",
+				MIMEType: "text/html",
+			},
+			{
+				Path:     "outputs/rabbit-game/README.txt",
+				Name:     "README.txt",
+				Kind:     "file",
+				MIMEType: "text/plain",
+			},
+		},
+	}
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if err := os.WriteFile(manifestPath, raw, 0o644); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	reporter := &fakeReporter{taskID: "task_1"}
+	runner := NewClaudeRunner(nil, cwd)
+	if err := runner.importArtifacts("task_1", reporter); err != nil {
+		t.Fatalf("importArtifacts() error = %v", err)
+	}
+
+	if len(reporter.artifacts) != 2 {
+		t.Fatalf("len(artifacts) = %d, want 2", len(reporter.artifacts))
+	}
+	if reporter.artifacts[0].FileName != "rabbit-game.html" {
+		t.Fatalf("artifacts[0].FileName = %q", reporter.artifacts[0].FileName)
+	}
+	if reporter.artifacts[1].FileName != "README.txt" {
+		t.Fatalf("artifacts[1].FileName = %q", reporter.artifacts[1].FileName)
+	}
+	if len(reporter.deliverIDs) != 2 {
+		t.Fatalf("len(deliverIDs) = %d, want 2", len(reporter.deliverIDs))
+	}
+	if len(reporter.events) == 0 || reporter.events[len(reporter.events)-1] != "claude_artifacts:Claude 已登记 2 个交付产物" {
+		t.Fatalf("events = %#v", reporter.events)
+	}
+}
+
+func TestImportArtifactsRejectsEscapingPath(t *testing.T) {
+	t.Parallel()
+
+	cwd := t.TempDir()
+	manifestDir := filepath.Join(cwd, ".open-xiaoai-agent", "artifacts")
+	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(manifest) error = %v", err)
+	}
+	manifestPath := filepath.Join(manifestDir, "task_1.json")
+	raw, err := json.Marshal(artifactManifest{
+		Deliver: []artifactManifestEntry{
+			{Path: "../escape.txt", Name: "escape.txt", Kind: "file"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if err := os.WriteFile(manifestPath, raw, 0o644); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	reporter := &fakeReporter{taskID: "task_1"}
+	runner := NewClaudeRunner(nil, cwd)
+	if err := runner.importArtifacts("task_1", reporter); err == nil {
+		t.Fatal("importArtifacts() error = nil, want non-nil")
 	}
 }
 
