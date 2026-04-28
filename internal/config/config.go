@@ -19,6 +19,9 @@ type FileConfig struct {
 	Database struct {
 		DSN string `yaml:"dsn"`
 	} `yaml:"database"`
+	IM struct {
+		MediaCacheDir string `yaml:"media_cache_dir"`
+	} `yaml:"im"`
 	OpenAI struct {
 		BaseURL string `yaml:"base_url"`
 	} `yaml:"openai"`
@@ -57,18 +60,29 @@ func Load(rootDir string) (*AppConfig, error) {
 	if cfg.Soul == "" {
 		return nil, fmt.Errorf("SOUL.md is empty")
 	}
-	if err := cfg.normalize(); err != nil {
+	if err := cfg.normalize(rootDir); err != nil {
 		return nil, err
 	}
 
 	return &cfg, nil
 }
 
-func (c *AppConfig) normalize() error {
+func (c *AppConfig) normalize(rootDir string) error {
 	c.Database.DSN = strings.TrimSpace(c.Database.DSN)
 	if c.Database.DSN == "" {
 		return fmt.Errorf("database.dsn is required")
 	}
+	c.IM.MediaCacheDir = strings.TrimSpace(c.IM.MediaCacheDir)
+	if c.IM.MediaCacheDir == "" {
+		c.IM.MediaCacheDir = filepath.Join(rootDir, ".cache", "im-media")
+	} else if !filepath.IsAbs(c.IM.MediaCacheDir) {
+		c.IM.MediaCacheDir = filepath.Join(rootDir, c.IM.MediaCacheDir)
+	}
+	absMediaCacheDir, err := filepath.Abs(c.IM.MediaCacheDir)
+	if err != nil {
+		return fmt.Errorf("resolve im.media_cache_dir: %w", err)
+	}
+	c.IM.MediaCacheDir = absMediaCacheDir
 	defaultBaseURL := strings.TrimRight(strings.TrimSpace(c.OpenAI.BaseURL), "/")
 	if defaultBaseURL == "" {
 		defaultBaseURL = "https://api.openai.com/v1"

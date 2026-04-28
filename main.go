@@ -53,7 +53,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	imService, err := im.NewService(dsn, settingsStore)
+	imService, err := im.NewService(dsn, settingsStore, appConfig.IM.MediaCacheDir)
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -42,6 +42,9 @@ reply:
 	if cfg.Database.DSN != "user:pass@tcp(127.0.0.1:3306)/open_xiaoai_agent" {
 		t.Fatalf("database.dsn = %q", cfg.Database.DSN)
 	}
+	if cfg.IM.MediaCacheDir != filepath.Join(dir, ".cache", "im-media") {
+		t.Fatalf("im.media_cache_dir = %q", cfg.IM.MediaCacheDir)
+	}
 	if cfg.AMap.APIKey != "amap-key" {
 		t.Fatalf("amap.api_key = %q", cfg.AMap.APIKey)
 	}
@@ -146,6 +149,35 @@ reply:
 	}
 	if cfg.Database.DSN != "user:pass@tcp(127.0.0.1:3306)/open_xiaoai_agent" {
 		t.Fatalf("database.dsn = %q", cfg.Database.DSN)
+	}
+}
+
+func TestLoad_UsesCustomMediaCacheDir(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "SOUL.md"), "# 角色\n你是一个有边界感的语音助手。")
+	writeFile(t, filepath.Join(dir, "config.yaml"), `
+database:
+  dsn: user:pass@tcp(127.0.0.1:3306)/open_xiaoai_agent
+im:
+  media_cache_dir: data/im-cache
+openai:
+  base_url: https://api.openai.com/v1
+intent:
+  model: gpt-4.1-mini
+  api_key: intent-key
+reply:
+  model: gpt-4.1
+  api_key: reply-key
+`)
+
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.IM.MediaCacheDir != filepath.Join(dir, "data", "im-cache") {
+		t.Fatalf("im.media_cache_dir = %q", cfg.IM.MediaCacheDir)
 	}
 }
 

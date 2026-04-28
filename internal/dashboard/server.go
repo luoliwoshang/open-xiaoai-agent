@@ -3,6 +3,7 @@ package dashboard
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 
@@ -31,6 +32,7 @@ type Server struct {
 		PollWeChatLogin(sessionKey string) (im.WeChatLoginStatus, error)
 		ConfirmWeChatLogin(sessionKey string) (im.Account, error)
 		SendTextToDefaultChannel(text string) (im.DeliveryReceipt, error)
+		SendImageToDefaultChannel(req im.ImageSendRequest) (im.DeliveryReceipt, error)
 		UpsertTarget(accountID string, name string, targetUserID string, setDefault bool) (im.Target, error)
 		SetDefaultTarget(accountID string, targetID string) error
 		DeleteTarget(targetID string) error
@@ -52,6 +54,7 @@ func New(addr string, tasks *tasks.Manager, claude *complextask.Service, convers
 	PollWeChatLogin(sessionKey string) (im.WeChatLoginStatus, error)
 	ConfirmWeChatLogin(sessionKey string) (im.Account, error)
 	SendTextToDefaultChannel(text string) (im.DeliveryReceipt, error)
+	SendImageToDefaultChannel(req im.ImageSendRequest) (im.DeliveryReceipt, error)
 	UpsertTarget(accountID string, name string, targetUserID string, setDefault bool) (im.Target, error)
 	SetDefaultTarget(accountID string, targetID string) error
 	DeleteTarget(targetID string) error
@@ -80,6 +83,7 @@ func (s *Server) ListenAndServe() error {
 	mux.HandleFunc("/api/im/wechat/login/status", s.handleWeChatLoginStatus)
 	mux.HandleFunc("/api/im/wechat/login/confirm", s.handleWeChatLoginConfirm)
 	mux.HandleFunc("/api/im/debug/send-default", s.handleIMDebugSendDefault)
+	mux.HandleFunc("/api/im/debug/send-image-default", s.handleIMDebugSendImageDefault)
 	mux.HandleFunc("/api/im/targets", s.handleIMTargets)
 	mux.HandleFunc("/api/im/targets/default", s.handleIMTargetDefault)
 	mux.HandleFunc("/api/im/targets/delete", s.handleIMTargetDelete)
@@ -298,6 +302,50 @@ func (s *Server) handleIMDebugSendDefault(w http.ResponseWriter, r *http.Request
 	}
 
 	receipt, err := s.im.SendTextToDefaultChannel(payload.Text)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"ok":      true,
+		"receipt": receipt,
+	})
+}
+
+func (s *Server) handleIMDebugSendImageDefault(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.im == nil {
+		http.Error(w, "im gateway is not configured", http.StatusServiceUnavailable)
+		return
+	}
+	if err := r.ParseMultipartForm(16 << 20); err != nil {
+		http.Error(w, fmt.Sprintf("parse image upload form: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("read image upload file: %v", err), http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	content, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("read image upload content: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	receipt, err := s.im.SendImageToDefaultChannel(im.ImageSendRequest{
+		FileName: header.Filename,
+		MimeType: header.Header.Get("Content-Type"),
+		Content:  content,
+		Caption:  r.FormValue("caption"),
+	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

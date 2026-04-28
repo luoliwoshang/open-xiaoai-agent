@@ -23,13 +23,13 @@ Current responsibilities:
 - run `reply` generation for normal chat and tool-result summarization
 - drive local TTS playback on the device through the existing client protocol
 - maintain lightweight async tasks
-- provide phase-1 IM gateway capability for WeChat text delivery
+- provide phase-1 IM gateway capability for WeChat text delivery plus default-channel image debug send
 - expose a React dashboard over API + web frontend
 
 Current non-goals / known missing pieces:
 
 - no IM inbound conversation handling yet
-- no media delivery in IM gateway yet
+- no automatic IM media mirror yet beyond text
 - no group routing in IM gateway yet
 - no proper voice interruption detection
 - some latency optimizations were intentionally not carried over from earlier experiments
@@ -151,6 +151,7 @@ Config domains currently used:
 - `intent.model / base_url / api_key`
 - `reply.model / base_url / api_key`
 - `amap.api_key`
+- `im.media_cache_dir`
 
 Important:
 
@@ -200,7 +201,14 @@ IM gateway store:
   - logged-in IM accounts
   - default text delivery targets
   - recent IM gateway events
-- current scope is outbound text delivery only
+- current scope is text delivery plus default-channel image debug send
+
+Media cache:
+
+- uploaded IM debug images are cached on local disk before adapter delivery
+- cache directory comes from `config.yaml` field `im.media_cache_dir`
+- current default is `.cache/im-media` under the repo root
+- files are intentionally not auto-cleaned yet
 
 Claude-private store:
 
@@ -441,6 +449,7 @@ Important routes:
 - `GET /api/im/wechat/login/status`
 - `POST /api/im/wechat/login/confirm`
 - `POST /api/im/debug/send-default`
+- `POST /api/im/debug/send-image-default`
 - `POST /api/im/targets`
 - `POST /api/im/targets/default`
 - `POST /api/im/targets/delete`

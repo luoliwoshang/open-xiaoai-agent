@@ -17,6 +17,8 @@ type stubAdapter struct {
 	loginErr    error
 	loginResult WeChatLoginResult
 	messages    []string
+	images      []PreparedImage
+	captions    []string
 }
 
 func (s *stubAdapter) Platform() string {
@@ -44,24 +46,48 @@ func (s *stubAdapter) SendText(ctx context.Context, account Account, target Targ
 	return TextSendResult{MessageID: "msg_1"}, nil
 }
 
+func (s *stubAdapter) SendImage(ctx context.Context, account Account, target Target, image PreparedImage, caption string) (ImageSendResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.images = append(s.images, image)
+	s.captions = append(s.captions, caption)
+	if s.sendErr != nil {
+		return ImageSendResult{}, s.sendErr
+	}
+	return ImageSendResult{MessageID: "img_1"}, nil
+}
+
 func (s *stubAdapter) sentCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.messages)
 }
 
-func TestServiceUpdateDeliveryConfigPersistsSelection(t *testing.T) {
-	t.Parallel()
+func (s *stubAdapter) imageCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.images)
+}
+
+func newTestService(t *testing.T) (*Service, *settings.Store) {
+	t.Helper()
 
 	dsn := testmysql.NewDSN(t)
 	settingsStore, err := settings.NewStore(dsn)
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}
-	service, err := NewService(dsn, settingsStore)
+	service, err := NewService(dsn, settingsStore, t.TempDir())
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
+	return service, settingsStore
+}
+
+func TestServiceUpdateDeliveryConfigPersistsSelection(t *testing.T) {
+	t.Parallel()
+
+	service, _ := newTestService(t)
 
 	account, err := service.store.UpsertAccount("stub", "bot@im.bot", "user@im.wechat", "Bot", "https://example.com", "token")
 	if err != nil {
@@ -90,15 +116,7 @@ func TestServiceUpdateDeliveryConfigPersistsSelection(t *testing.T) {
 func TestServiceConfirmWeChatLoginPersistsAccountAfterExplicitConfirmation(t *testing.T) {
 	t.Parallel()
 
-	dsn := testmysql.NewDSN(t)
-	settingsStore, err := settings.NewStore(dsn)
-	if err != nil {
-		t.Fatalf("NewStore() error = %v", err)
-	}
-	service, err := NewService(dsn, settingsStore)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	service, _ := newTestService(t)
 
 	adapter := &stubAdapter{
 		loginResult: WeChatLoginResult{
@@ -159,15 +177,7 @@ func TestServiceConfirmWeChatLoginPersistsAccountAfterExplicitConfirmation(t *te
 func TestServiceSendTextToDefaultChannelUsesSavedSelectionEvenWhenMirrorDisabled(t *testing.T) {
 	t.Parallel()
 
-	dsn := testmysql.NewDSN(t)
-	settingsStore, err := settings.NewStore(dsn)
-	if err != nil {
-		t.Fatalf("NewStore() error = %v", err)
-	}
-	service, err := NewService(dsn, settingsStore)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	service, _ := newTestService(t)
 
 	adapter := &stubAdapter{}
 	service.adapters["stub"] = adapter
@@ -202,18 +212,59 @@ func TestServiceSendTextToDefaultChannelUsesSavedSelectionEvenWhenMirrorDisabled
 	}
 }
 
+func TestServiceSendImageToDefaultChannelUsesSavedSelectionEvenWhenMirrorDisabled(t *testing.T) {
+	t.Parallel()
+
+	service, _ := newTestService(t)
+
+	adapter := &stubAdapter{}
+	service.adapters["stub"] = adapter
+
+	account, err := service.store.UpsertAccount("stub", "bot@im.bot", "user@im.wechat", "Bot", "https://example.com", "token")
+	if err != nil {
+		t.Fatalf("UpsertAccount() error = %v", err)
+	}
+	target, err := service.store.UpsertTarget(account.ID, "我的微信", "user@im.wechat", true)
+	if err != nil {
+		t.Fatalf("UpsertTarget() error = %v", err)
+	}
+	if _, err := service.UpdateDeliveryConfig(false, account.ID, target.ID); err != nil {
+		t.Fatalf("UpdateDeliveryConfig() error = %v", err)
+	}
+
+	receipt, err := service.SendImageToDefaultChannel(ImageSendRequest{
+		FileName: "test.png",
+		MimeType: "image/png",
+		Content:  []byte{0x89, 0x50, 0x4e, 0x47},
+		Caption:  "图片调试消息",
+	})
+	if err != nil {
+		t.Fatalf("SendImageToDefaultChannel() error = %v", err)
+	}
+	if receipt.Account.ID != account.ID {
+		t.Fatalf("receipt.Account.ID = %q, want %q", receipt.Account.ID, account.ID)
+	}
+	if receipt.Target.ID != target.ID {
+		t.Fatalf("receipt.Target.ID = %q, want %q", receipt.Target.ID, target.ID)
+	}
+	if receipt.Kind != DeliveryKindImage {
+		t.Fatalf("receipt.Kind = %q, want %q", receipt.Kind, DeliveryKindImage)
+	}
+	if receipt.Caption != "图片调试消息" {
+		t.Fatalf("receipt.Caption = %q, want 图片调试消息", receipt.Caption)
+	}
+	if receipt.MediaFileName != "test.png" {
+		t.Fatalf("receipt.MediaFileName = %q, want test.png", receipt.MediaFileName)
+	}
+	if adapter.imageCount() != 1 {
+		t.Fatalf("imageCount() = %d, want 1", adapter.imageCount())
+	}
+}
+
 func TestServiceMirrorTextUpdatesDeliverySuccess(t *testing.T) {
 	t.Parallel()
 
-	dsn := testmysql.NewDSN(t)
-	settingsStore, err := settings.NewStore(dsn)
-	if err != nil {
-		t.Fatalf("NewStore() error = %v", err)
-	}
-	service, err := NewService(dsn, settingsStore)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	service, _ := newTestService(t)
 
 	adapter := &stubAdapter{}
 	service.adapters["stub"] = adapter
@@ -250,15 +301,7 @@ func TestServiceMirrorTextUpdatesDeliverySuccess(t *testing.T) {
 func TestServiceMirrorTextUpdatesDeliveryFailure(t *testing.T) {
 	t.Parallel()
 
-	dsn := testmysql.NewDSN(t)
-	settingsStore, err := settings.NewStore(dsn)
-	if err != nil {
-		t.Fatalf("NewStore() error = %v", err)
-	}
-	service, err := NewService(dsn, settingsStore)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	service, _ := newTestService(t)
 
 	adapter := &stubAdapter{sendErr: errors.New("boom")}
 	service.adapters["stub"] = adapter
@@ -295,15 +338,7 @@ func TestServiceMirrorTextUpdatesDeliveryFailure(t *testing.T) {
 func TestServiceDeleteAccountDisablesDelivery(t *testing.T) {
 	t.Parallel()
 
-	dsn := testmysql.NewDSN(t)
-	settingsStore, err := settings.NewStore(dsn)
-	if err != nil {
-		t.Fatalf("NewStore() error = %v", err)
-	}
-	service, err := NewService(dsn, settingsStore)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	service, settingsStore := newTestService(t)
 
 	account, err := service.store.UpsertAccount("stub", "bot@im.bot", "user@im.wechat", "Bot", "https://example.com", "token")
 	if err != nil {
@@ -333,15 +368,7 @@ func TestServiceDeleteAccountDisablesDelivery(t *testing.T) {
 func TestServiceDeleteNonSelectedTargetKeepsDeliverySelection(t *testing.T) {
 	t.Parallel()
 
-	dsn := testmysql.NewDSN(t)
-	settingsStore, err := settings.NewStore(dsn)
-	if err != nil {
-		t.Fatalf("NewStore() error = %v", err)
-	}
-	service, err := NewService(dsn, settingsStore)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	service, settingsStore := newTestService(t)
 
 	account, err := service.store.UpsertAccount("stub", "bot@im.bot", "user@im.wechat", "Bot", "https://example.com", "token")
 	if err != nil {
@@ -378,15 +405,7 @@ func TestServiceDeleteNonSelectedTargetKeepsDeliverySelection(t *testing.T) {
 func TestServiceDeleteSelectedTargetDisablesDelivery(t *testing.T) {
 	t.Parallel()
 
-	dsn := testmysql.NewDSN(t)
-	settingsStore, err := settings.NewStore(dsn)
-	if err != nil {
-		t.Fatalf("NewStore() error = %v", err)
-	}
-	service, err := NewService(dsn, settingsStore)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	service, settingsStore := newTestService(t)
 
 	account, err := service.store.UpsertAccount("stub", "bot@im.bot", "user@im.wechat", "Bot", "https://example.com", "token")
 	if err != nil {

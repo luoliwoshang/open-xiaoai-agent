@@ -17,9 +17,10 @@ type runtimeSettings interface {
 }
 
 type Service struct {
-	store    *Store
-	settings runtimeSettings
-	adapters map[string]Adapter
+	store      *Store
+	settings   runtimeSettings
+	mediaCache *MediaCache
+	adapters   map[string]Adapter
 
 	pendingMu     sync.Mutex
 	pendingLogins map[string]pendingWeChatLogin
@@ -37,15 +38,20 @@ type pendingWeChatLogin struct {
 	ConfirmedAt time.Time
 }
 
-func NewService(dsn string, runtimeSettings runtimeSettings) (*Service, error) {
+func NewService(dsn string, runtimeSettings runtimeSettings, mediaCacheDir string) (*Service, error) {
 	store, err := NewStore(dsn)
+	if err != nil {
+		return nil, err
+	}
+	mediaCache, err := NewMediaCache(mediaCacheDir)
 	if err != nil {
 		return nil, err
 	}
 
 	svc := &Service{
-		store:    store,
-		settings: runtimeSettings,
+		store:      store,
+		settings:   runtimeSettings,
+		mediaCache: mediaCache,
 		adapters: map[string]Adapter{
 			PlatformWeChat: NewWeChatAdapter(),
 		},
@@ -282,6 +288,23 @@ func (s *Service) SendTextToDefaultChannel(text string) (DeliveryReceipt, error)
 	})
 }
 
+func (s *Service) SendImageToDefaultChannel(req ImageSendRequest) (DeliveryReceipt, error) {
+	if s == nil || s.store == nil || s.settings == nil || s.mediaCache == nil {
+		return DeliveryReceipt{}, fmt.Errorf("im service is not configured")
+	}
+
+	cfg := s.settings.Snapshot()
+	if strings.TrimSpace(cfg.IMSelectedAccountID) == "" || strings.TrimSpace(cfg.IMSelectedTargetID) == "" {
+		return DeliveryReceipt{}, fmt.Errorf("默认渠道尚未配置，请先保存账号和触达目标")
+	}
+
+	prepared, err := s.mediaCache.StoreImage(req)
+	if err != nil {
+		return DeliveryReceipt{}, err
+	}
+	return s.deliverImage(cfg.IMSelectedAccountID, cfg.IMSelectedTargetID, prepared, req.Caption)
+}
+
 func (s *Service) Reset() error {
 	if s == nil || s.store == nil {
 		return nil
@@ -338,28 +361,9 @@ func (s *Service) runDeliveryLoop() {
 }
 
 func (s *Service) deliverText(request deliveryRequest) (DeliveryReceipt, error) {
-	account, ok, err := s.store.GetAccount(request.AccountID)
+	account, target, adapter, err := s.resolveDelivery(request.AccountID, request.TargetID)
 	if err != nil {
 		return DeliveryReceipt{}, err
-	}
-	if !ok {
-		return DeliveryReceipt{}, fmt.Errorf("im account %q not found", request.AccountID)
-	}
-
-	target, ok, err := s.store.GetTarget(request.TargetID)
-	if err != nil {
-		return DeliveryReceipt{}, err
-	}
-	if !ok {
-		return DeliveryReceipt{}, fmt.Errorf("im target %q not found", request.TargetID)
-	}
-	if target.AccountID != account.ID {
-		return DeliveryReceipt{}, fmt.Errorf("im target %q does not belong to account %q", target.ID, account.ID)
-	}
-
-	adapter, ok := s.adapters[account.Platform]
-	if !ok {
-		return DeliveryReceipt{}, fmt.Errorf("im adapter %q is not configured", account.Platform)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -378,8 +382,69 @@ func (s *Service) deliverText(request deliveryRequest) (DeliveryReceipt, error) 
 		Account:   account,
 		Target:    target,
 		MessageID: result.MessageID,
+		Kind:      DeliveryKindText,
 		Text:      request.Text,
 	}, nil
+}
+
+func (s *Service) deliverImage(accountID string, targetID string, image PreparedImage, caption string) (DeliveryReceipt, error) {
+	account, target, adapter, err := s.resolveDelivery(accountID, targetID)
+	if err != nil {
+		return DeliveryReceipt{}, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	result, err := adapter.SendImage(ctx, account, target, image, caption)
+	if err != nil {
+		_ = s.store.MarkDeliveryFailure(account.ID, err.Error())
+		_ = s.store.AppendEvent(account.ID, "send_failed", fmt.Sprintf("发送图片到 %s 失败：%s", target.Name, err.Error()))
+		return DeliveryReceipt{}, err
+	}
+
+	_ = s.store.MarkDeliverySuccess(account.ID)
+	eventLabel := strings.TrimSpace(caption)
+	if eventLabel == "" {
+		eventLabel = image.FileName
+	}
+	_ = s.store.AppendEvent(account.ID, "send_image", fmt.Sprintf("已发送图片到 %s：%s", target.Name, trimForEvent(eventLabel)))
+	return DeliveryReceipt{
+		Account:       account,
+		Target:        target,
+		MessageID:     result.MessageID,
+		Kind:          DeliveryKindImage,
+		Caption:       strings.TrimSpace(caption),
+		MediaFileName: image.FileName,
+		MediaMimeType: image.MimeType,
+	}, nil
+}
+
+func (s *Service) resolveDelivery(accountID string, targetID string) (Account, Target, Adapter, error) {
+	account, ok, err := s.store.GetAccount(accountID)
+	if err != nil {
+		return Account{}, Target{}, nil, err
+	}
+	if !ok {
+		return Account{}, Target{}, nil, fmt.Errorf("im account %q not found", accountID)
+	}
+
+	target, ok, err := s.store.GetTarget(targetID)
+	if err != nil {
+		return Account{}, Target{}, nil, err
+	}
+	if !ok {
+		return Account{}, Target{}, nil, fmt.Errorf("im target %q not found", targetID)
+	}
+	if target.AccountID != account.ID {
+		return Account{}, Target{}, nil, fmt.Errorf("im target %q does not belong to account %q", target.ID, account.ID)
+	}
+
+	adapter, ok := s.adapters[account.Platform]
+	if !ok {
+		return Account{}, Target{}, nil, fmt.Errorf("im adapter %q is not configured", account.Platform)
+	}
+	return account, target, adapter, nil
 }
 
 func (s *Service) repairDeliveryConfigAfterMutation(accountID string, targetID string) error {
