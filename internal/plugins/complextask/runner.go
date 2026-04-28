@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"unicode"
 
@@ -45,7 +47,7 @@ func (r *ClaudeRunner) Run(ctx context.Context, prompt string, reporter plugin.A
 		"--output-format",
 		"stream-json",
 		"--verbose",
-		buildClaudePrompt(prompt),
+		buildClaudePrompt(taskID, prompt),
 	), reporter)
 }
 
@@ -79,7 +81,7 @@ func (r *ClaudeRunner) Resume(ctx context.Context, sourceTaskID string, prompt s
 		"--output-format",
 		"stream-json",
 		"--verbose",
-		buildClaudeResumePrompt(prompt),
+		buildClaudeResumePrompt(taskID, prompt),
 	), reporter)
 }
 
@@ -122,6 +124,10 @@ func (r *ClaudeRunner) runCommand(ctx context.Context, taskID string, command *e
 	}
 
 	if parser.result != "" {
+		if err := r.importArtifacts(taskID, reporter); err != nil {
+			_ = r.store.Fail(taskID, err.Error())
+			return "", err
+		}
 		if err := r.store.Complete(taskID, parser.result); err != nil {
 			return "", err
 		}
@@ -217,8 +223,20 @@ func summarizeText(text string) string {
 	return strings.TrimSpace(text)
 }
 
-func buildClaudePrompt(task string) string {
+type artifactManifest struct {
+	Deliver []artifactManifestEntry `json:"deliver"`
+}
+
+type artifactManifestEntry struct {
+	Path     string `json:"path"`
+	Name     string `json:"name"`
+	Kind     string `json:"kind"`
+	MIMEType string `json:"mime_type"`
+}
+
+func buildClaudePrompt(taskID string, task string) string {
 	task = strings.TrimSpace(task)
+	manifestPath := artifactManifestRelativePath(taskID)
 	return strings.TrimSpace(fmt.Sprintf(
 		`执行以下任务：%s
 
@@ -227,13 +245,20 @@ func buildClaudePrompt(task string) string {
 2. 进度汇报只用自然中文短句，不要使用特殊符号、emoji、Markdown 列表、代码块或其他不利于 TTS 识别的格式。
 3. 如果任务还没有真正结束，不要提前说已经完成。
 4. 最终总结也要简短精炼，默认按可以直接播报给用户的口语化结果来写。
-5. 最终总结优先说明三件事：你完成了什么、产出放在哪里、用户接下来可以怎么用；尽量控制在 2 到 4 句，不要长篇展开。`,
+5. 如果本次任务产出了需要交付给系统的文件，请在工作目录里写入 JSON 索引文件：%s
+6. 这个 JSON 文件只负责声明交付产物位置和元数据，不要把文件内容写进 JSON。
+7. JSON 结构固定为 {"deliver":[{"path":"相对工作目录的文件路径","name":"展示文件名","kind":"file","mime_type":"可选 MIME 类型"}]}。
+8. manifest 里的 path 必须指向这次任务真实生成的文件，并且使用相对工作目录的路径。
+9. 如果没有需要交付的文件，就不要创建这个 JSON 索引文件。
+10. 最终总结优先说明两件事：你完成了什么、用户接下来可以怎么用；尽量控制在 2 到 4 句，不要长篇展开。`,
 		task,
+		manifestPath,
 	))
 }
 
-func buildClaudeResumePrompt(task string) string {
+func buildClaudeResumePrompt(taskID string, task string) string {
 	task = strings.TrimSpace(task)
+	manifestPath := artifactManifestRelativePath(taskID)
 	return strings.TrimSpace(fmt.Sprintf(
 		`继续基于刚才已经完成的同一个任务接着处理。补充要求如下：%s
 
@@ -243,9 +268,140 @@ func buildClaudeResumePrompt(task string) string {
 3. 进度汇报只用自然中文短句，不要使用特殊符号、emoji、Markdown 列表、代码块或其他不利于 TTS 识别的格式。
 4. 如果任务还没有真正结束，不要提前说已经完成。
 5. 最终总结也要简短精炼，默认按可以直接播报给用户的口语化结果来写。
-6. 最终总结优先说明三件事：这次补充后你完成了什么、产出放在哪里、用户接下来可以怎么用；尽量控制在 2 到 4 句，不要长篇展开。`,
+6. 如果本次续做任务产出了需要交付给系统的文件，请在工作目录里写入 JSON 索引文件：%s
+7. 这个 JSON 文件只负责声明交付产物位置和元数据，不要把文件内容写进 JSON。
+8. JSON 结构固定为 {"deliver":[{"path":"相对工作目录的文件路径","name":"展示文件名","kind":"file","mime_type":"可选 MIME 类型"}]}。
+9. manifest 里的 path 必须指向这次续做真实生成或更新过的文件，并且使用相对工作目录的路径。
+10. 如果这次续做没有新的交付文件，就不要创建这个 JSON 索引文件。
+11. 最终总结优先说明两件事：这次补充后你完成了什么、用户接下来可以怎么用；尽量控制在 2 到 4 句，不要长篇展开。`,
 		task,
+		manifestPath,
 	))
+}
+
+func (r *ClaudeRunner) importArtifacts(taskID string, reporter plugin.AsyncReporter) error {
+	manifest, found, err := r.loadArtifactManifest(taskID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return nil
+	}
+
+	deliverIDs := make([]string, 0, len(manifest.Deliver))
+	for index, item := range manifest.Deliver {
+		req, err := r.buildArtifactRequest(item)
+		if err != nil {
+			return fmt.Errorf("import manifest deliver[%d]: %w", index, err)
+		}
+		ref, err := reporter.PutArtifact(req)
+		if err != nil {
+			return fmt.Errorf("register manifest deliver[%d]: %w", index, err)
+		}
+		deliverIDs = append(deliverIDs, ref.ID)
+	}
+	if len(deliverIDs) == 0 {
+		return nil
+	}
+	if err := reporter.SetDeliverArtifacts(deliverIDs); err != nil {
+		return fmt.Errorf("mark deliver artifacts: %w", err)
+	}
+	return reporter.Event("claude_artifacts", fmt.Sprintf("Claude 已登记 %d 个交付产物", len(deliverIDs)))
+}
+
+func (r *ClaudeRunner) loadArtifactManifest(taskID string) (artifactManifest, bool, error) {
+	path := artifactManifestAbsolutePath(r.cwd, taskID)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return artifactManifest{}, false, nil
+		}
+		return artifactManifest{}, false, fmt.Errorf("read artifact manifest: %w", err)
+	}
+
+	var manifest artifactManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return artifactManifest{}, false, fmt.Errorf("decode artifact manifest: %w", err)
+	}
+	return manifest, true, nil
+}
+
+func (r *ClaudeRunner) buildArtifactRequest(item artifactManifestEntry) (plugin.PutArtifactRequest, error) {
+	resolvedPath, err := resolveArtifactPath(r.cwd, item.Path)
+	if err != nil {
+		return plugin.PutArtifactRequest{}, err
+	}
+	stat, err := os.Stat(resolvedPath)
+	if err != nil {
+		return plugin.PutArtifactRequest{}, fmt.Errorf("stat artifact file: %w", err)
+	}
+	if stat.IsDir() {
+		return plugin.PutArtifactRequest{}, fmt.Errorf("artifact path %q is a directory", item.Path)
+	}
+	file, err := os.Open(resolvedPath)
+	if err != nil {
+		return plugin.PutArtifactRequest{}, fmt.Errorf("open artifact file: %w", err)
+	}
+
+	name := strings.TrimSpace(item.Name)
+	if name == "" {
+		name = filepath.Base(resolvedPath)
+	}
+	kind := strings.TrimSpace(item.Kind)
+	if kind == "" {
+		kind = "file"
+	}
+
+	return plugin.PutArtifactRequest{
+		Name:     name,
+		Kind:     kind,
+		MIMEType: strings.TrimSpace(item.MIMEType),
+		Reader:   file,
+		Size:     stat.Size(),
+	}, nil
+}
+
+func artifactManifestRelativePath(taskID string) string {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		taskID = "task"
+	}
+	return filepath.ToSlash(filepath.Join(".open-xiaoai-agent", "artifacts", taskID+".json"))
+}
+
+func artifactManifestAbsolutePath(cwd string, taskID string) string {
+	return filepath.Join(strings.TrimSpace(cwd), filepath.FromSlash(artifactManifestRelativePath(taskID)))
+}
+
+func resolveArtifactPath(cwd string, rawPath string) (string, error) {
+	cwd = strings.TrimSpace(cwd)
+	rawPath = strings.TrimSpace(rawPath)
+	if rawPath == "" {
+		return "", fmt.Errorf("artifact path is required")
+	}
+
+	root, err := filepath.Abs(cwd)
+	if err != nil {
+		return "", fmt.Errorf("resolve claude cwd: %w", err)
+	}
+
+	target := rawPath
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(root, filepath.FromSlash(rawPath))
+	}
+	target, err = filepath.Abs(filepath.Clean(target))
+	if err != nil {
+		return "", fmt.Errorf("resolve artifact path: %w", err)
+	}
+
+	relative, err := filepath.Rel(root, target)
+	if err != nil {
+		return "", fmt.Errorf("rel artifact path: %w", err)
+	}
+	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("artifact path %q escapes claude working directory", rawPath)
+	}
+	return target, nil
 }
 
 func summarizeProgressText(text string) string {

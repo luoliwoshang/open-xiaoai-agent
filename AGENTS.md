@@ -422,6 +422,7 @@ Implemented behavior:
 - captures `system/init` for `session_id`
 - captures assistant text
 - captures final result
+- after Claude exits successfully, can import task artifacts from a manifest index file
 - stores Claude-private state in the Claude-private MySQL store
 
 Prompt shaping rules currently enforced for new Claude tasks:
@@ -429,7 +430,14 @@ Prompt shaping rules currently enforced for new Claude tasks:
 - prefix with “执行以下任务：...”
 - ask for short progress updates
 - avoid weird symbols / markdown noise in progress
+- if Claude needs to hand files back to the system, it should write a manifest index file under `.open-xiaoai-agent/artifacts/<task_id>.json`
 - final summary should still be concise and TTS-friendly
+
+Claude artifact handoff rule:
+
+- the manifest file is only an index of deliverable file locations and metadata
+- the Claude adapter reads those local files and calls the generic task artifact APIs
+- raw local paths do not cross the task-system boundary
 
 ### Resume / Continue Task
 

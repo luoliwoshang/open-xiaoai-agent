@@ -34,6 +34,9 @@ func (c *artifactCache) put(taskID string, req plugin.PutArtifactRequest, artifa
 	if req.Reader == nil {
 		return Artifact{}, fmt.Errorf("artifact reader is required")
 	}
+	if closer, ok := req.Reader.(io.Closer); ok {
+		defer closer.Close()
+	}
 
 	fileName := filepath.Base(strings.TrimSpace(req.Name))
 	if fileName == "." || fileName == string(filepath.Separator) {
