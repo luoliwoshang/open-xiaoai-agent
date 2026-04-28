@@ -3,6 +3,8 @@ package assistant
 import (
 	"testing"
 	"time"
+
+	"github.com/luoliwoshang/open-xiaoai-agent/internal/testmysql"
 )
 
 type staticSessionWindow struct {
@@ -69,7 +71,7 @@ func TestHistoryStoreSlidingWindowUsesLastActive(t *testing.T) {
 func TestHistoryStorePersistsConversation(t *testing.T) {
 	t.Parallel()
 
-	path := "sqlite://" + t.TempDir() + "/agent.db"
+	path := testmysql.NewDSN(t)
 	start := time.Now()
 	session := historyTestSession{id: "session-persist"}
 
@@ -96,7 +98,7 @@ func TestHistoryStorePersistsConversation(t *testing.T) {
 func TestHistoryStoreResetClearsPersistence(t *testing.T) {
 	t.Parallel()
 
-	path := "sqlite://" + t.TempDir() + "/agent.db"
+	path := testmysql.NewDSN(t)
 	start := time.Now()
 	session := historyTestSession{id: "session-reset"}
 

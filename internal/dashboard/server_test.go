@@ -15,6 +15,7 @@ import (
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugins/complextask"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/settings"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/tasks"
+	"github.com/luoliwoshang/open-xiaoai-agent/internal/testmysql"
 )
 
 type fakeConversations struct {
@@ -111,7 +112,7 @@ func (f *fakeIM) Reset() error {
 func TestHandleResetClearsRuntimeData(t *testing.T) {
 	t.Parallel()
 
-	dsn := "sqlite://" + t.TempDir() + "/agent.db"
+	dsn := testmysql.NewDSN(t)
 	manager, err := tasks.NewManager(dsn)
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)

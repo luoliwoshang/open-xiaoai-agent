@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/settings"
+	"github.com/luoliwoshang/open-xiaoai-agent/internal/testmysql"
 )
 
 type stubAdapter struct {
@@ -47,7 +48,7 @@ func (s *stubAdapter) sentCount() int {
 func TestServiceUpdateDeliveryConfigPersistsSelection(t *testing.T) {
 	t.Parallel()
 
-	dsn := "sqlite://" + t.TempDir() + "/agent.db"
+	dsn := testmysql.NewDSN(t)
 	settingsStore, err := settings.NewStore(dsn)
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
@@ -84,7 +85,7 @@ func TestServiceUpdateDeliveryConfigPersistsSelection(t *testing.T) {
 func TestServiceMirrorTextUpdatesDeliverySuccess(t *testing.T) {
 	t.Parallel()
 
-	dsn := "sqlite://" + t.TempDir() + "/agent.db"
+	dsn := testmysql.NewDSN(t)
 	settingsStore, err := settings.NewStore(dsn)
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
@@ -129,7 +130,7 @@ func TestServiceMirrorTextUpdatesDeliverySuccess(t *testing.T) {
 func TestServiceMirrorTextUpdatesDeliveryFailure(t *testing.T) {
 	t.Parallel()
 
-	dsn := "sqlite://" + t.TempDir() + "/agent.db"
+	dsn := testmysql.NewDSN(t)
 	settingsStore, err := settings.NewStore(dsn)
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
@@ -174,7 +175,7 @@ func TestServiceMirrorTextUpdatesDeliveryFailure(t *testing.T) {
 func TestServiceDeleteAccountDisablesDelivery(t *testing.T) {
 	t.Parallel()
 
-	dsn := "sqlite://" + t.TempDir() + "/agent.db"
+	dsn := testmysql.NewDSN(t)
 	settingsStore, err := settings.NewStore(dsn)
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
@@ -212,7 +213,7 @@ func TestServiceDeleteAccountDisablesDelivery(t *testing.T) {
 func TestServiceDeleteNonSelectedTargetKeepsDeliverySelection(t *testing.T) {
 	t.Parallel()
 
-	dsn := "sqlite://" + t.TempDir() + "/agent.db"
+	dsn := testmysql.NewDSN(t)
 	settingsStore, err := settings.NewStore(dsn)
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
@@ -257,7 +258,7 @@ func TestServiceDeleteNonSelectedTargetKeepsDeliverySelection(t *testing.T) {
 func TestServiceDeleteSelectedTargetDisablesDelivery(t *testing.T) {
 	t.Parallel()
 
-	dsn := "sqlite://" + t.TempDir() + "/agent.db"
+	dsn := testmysql.NewDSN(t)
 	settingsStore, err := settings.NewStore(dsn)
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
