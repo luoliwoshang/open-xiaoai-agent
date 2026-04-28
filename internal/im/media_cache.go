@@ -15,6 +15,13 @@ type MediaCache struct {
 	dir string
 }
 
+type preparedCachedMedia struct {
+	FilePath string
+	FileName string
+	MimeType string
+	Size     int64
+}
+
 func NewMediaCache(dir string) (*MediaCache, error) {
 	dir = strings.TrimSpace(dir)
 	if dir == "" {
@@ -37,22 +44,46 @@ func (c *MediaCache) StoreImage(req ImageSendRequest) (PreparedImage, error) {
 	if c == nil {
 		return PreparedImage{}, fmt.Errorf("media cache is not configured")
 	}
+	prepared, err := c.storeMedia(req.FileName, req.MimeType, req.Content, "weixin-image", ".img", func(mimeType string) error {
+		if !strings.HasPrefix(strings.ToLower(mimeType), "image/") {
+			return fmt.Errorf("only image uploads are supported, got %q", mimeType)
+		}
+		return nil
+	})
+	if err != nil {
+		return PreparedImage{}, err
+	}
+	return PreparedImage(prepared), nil
+}
 
-	content := req.Content
+func (c *MediaCache) StoreFile(req FileSendRequest) (PreparedFile, error) {
+	if c == nil {
+		return PreparedFile{}, fmt.Errorf("media cache is not configured")
+	}
+	prepared, err := c.storeMedia(req.FileName, req.MimeType, req.Content, "weixin-file", ".bin", nil)
+	if err != nil {
+		return PreparedFile{}, err
+	}
+	return PreparedFile(prepared), nil
+}
+
+func (c *MediaCache) storeMedia(fileName string, mimeType string, content []byte, defaultPrefix string, defaultExt string, validate func(string) error) (preparedCachedMedia, error) {
 	if len(content) == 0 {
-		return PreparedImage{}, fmt.Errorf("image content is required")
+		return preparedCachedMedia{}, fmt.Errorf("media content is required")
 	}
 
-	fileName := filepath.Base(strings.TrimSpace(req.FileName))
+	fileName = filepath.Base(strings.TrimSpace(fileName))
 	if fileName == "." || fileName == string(filepath.Separator) {
 		fileName = ""
 	}
-	mimeType := strings.TrimSpace(req.MimeType)
+	mimeType = strings.TrimSpace(mimeType)
 	if mimeType == "" {
 		mimeType = http.DetectContentType(content)
 	}
-	if !strings.HasPrefix(strings.ToLower(mimeType), "image/") {
-		return PreparedImage{}, fmt.Errorf("only image uploads are supported, got %q", mimeType)
+	if validate != nil {
+		if err := validate(mimeType); err != nil {
+			return preparedCachedMedia{}, err
+		}
 	}
 
 	ext := strings.TrimSpace(filepath.Ext(fileName))
@@ -62,24 +93,24 @@ func (c *MediaCache) StoreImage(req ImageSendRequest) (PreparedImage, error) {
 		}
 	}
 	if ext == "" {
-		ext = ".img"
+		ext = defaultExt
 	}
 
 	prefix := sanitizeMediaBaseName(strings.TrimSuffix(fileName, filepath.Ext(fileName)))
 	if prefix == "" {
-		prefix = "weixin-image"
+		prefix = defaultPrefix
 	}
 	token, err := randomMediaToken(8)
 	if err != nil {
-		return PreparedImage{}, err
+		return preparedCachedMedia{}, err
 	}
 	storedName := fmt.Sprintf("%s-%s%s", prefix, token, ext)
 	filePath := filepath.Join(c.dir, storedName)
 	if err := os.WriteFile(filePath, content, 0o644); err != nil {
-		return PreparedImage{}, fmt.Errorf("write cached image: %w", err)
+		return preparedCachedMedia{}, fmt.Errorf("write cached media: %w", err)
 	}
 
-	return PreparedImage{
+	return preparedCachedMedia{
 		FilePath: filePath,
 		FileName: chooseMediaFileName(fileName, storedName),
 		MimeType: mimeType,

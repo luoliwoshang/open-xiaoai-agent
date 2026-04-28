@@ -18,6 +18,7 @@ type stubAdapter struct {
 	loginResult WeChatLoginResult
 	messages    []string
 	images      []PreparedImage
+	files       []PreparedFile
 	captions    []string
 }
 
@@ -57,6 +58,17 @@ func (s *stubAdapter) SendImage(ctx context.Context, account Account, target Tar
 	return ImageSendResult{MessageID: "img_1"}, nil
 }
 
+func (s *stubAdapter) SendFile(ctx context.Context, account Account, target Target, file PreparedFile, caption string) (FileSendResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.files = append(s.files, file)
+	s.captions = append(s.captions, caption)
+	if s.sendErr != nil {
+		return FileSendResult{}, s.sendErr
+	}
+	return FileSendResult{MessageID: "file_1"}, nil
+}
+
 func (s *stubAdapter) sentCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -67,6 +79,12 @@ func (s *stubAdapter) imageCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.images)
+}
+
+func (s *stubAdapter) fileCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.files)
 }
 
 func newTestService(t *testing.T) (*Service, *settings.Store) {
@@ -258,6 +276,55 @@ func TestServiceSendImageToDefaultChannelUsesSavedSelectionEvenWhenMirrorDisable
 	}
 	if adapter.imageCount() != 1 {
 		t.Fatalf("imageCount() = %d, want 1", adapter.imageCount())
+	}
+}
+
+func TestServiceSendFileToDefaultChannelUsesSavedSelectionEvenWhenMirrorDisabled(t *testing.T) {
+	t.Parallel()
+
+	service, _ := newTestService(t)
+
+	adapter := &stubAdapter{}
+	service.adapters["stub"] = adapter
+
+	account, err := service.store.UpsertAccount("stub", "bot@im.bot", "user@im.wechat", "Bot", "https://example.com", "token")
+	if err != nil {
+		t.Fatalf("UpsertAccount() error = %v", err)
+	}
+	target, err := service.store.UpsertTarget(account.ID, "我的微信", "user@im.wechat", true)
+	if err != nil {
+		t.Fatalf("UpsertTarget() error = %v", err)
+	}
+	if _, err := service.UpdateDeliveryConfig(false, account.ID, target.ID); err != nil {
+		t.Fatalf("UpdateDeliveryConfig() error = %v", err)
+	}
+
+	receipt, err := service.SendFileToDefaultChannel(FileSendRequest{
+		FileName: "story.txt",
+		MimeType: "text/plain",
+		Content:  []byte("hello from file"),
+		Caption:  "文件调试消息",
+	})
+	if err != nil {
+		t.Fatalf("SendFileToDefaultChannel() error = %v", err)
+	}
+	if receipt.Account.ID != account.ID {
+		t.Fatalf("receipt.Account.ID = %q, want %q", receipt.Account.ID, account.ID)
+	}
+	if receipt.Target.ID != target.ID {
+		t.Fatalf("receipt.Target.ID = %q, want %q", receipt.Target.ID, target.ID)
+	}
+	if receipt.Kind != DeliveryKindFile {
+		t.Fatalf("receipt.Kind = %q, want %q", receipt.Kind, DeliveryKindFile)
+	}
+	if receipt.Caption != "文件调试消息" {
+		t.Fatalf("receipt.Caption = %q, want 文件调试消息", receipt.Caption)
+	}
+	if receipt.MediaFileName != "story.txt" {
+		t.Fatalf("receipt.MediaFileName = %q, want story.txt", receipt.MediaFileName)
+	}
+	if adapter.fileCount() != 1 {
+		t.Fatalf("fileCount() = %d, want 1", adapter.fileCount())
 	}
 }
 
