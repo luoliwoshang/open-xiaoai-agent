@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -13,15 +14,16 @@ import (
 )
 
 type Manager struct {
-	mu      sync.Mutex
-	store   *Store
-	state   fileState
-	seq     uint64
-	cancels map[string]context.CancelFunc
+	mu            sync.Mutex
+	store         *Store
+	state         fileState
+	seq           uint64
+	cancels       map[string]context.CancelFunc
+	artifactCache *artifactCache
 }
 
-func NewManager(path string) (*Manager, error) {
-	store, err := NewStore(path)
+func NewManager(dsn string, artifactCacheDir string) (*Manager, error) {
+	store, err := NewStore(dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -29,11 +31,16 @@ func NewManager(path string) (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
+	cache, err := newArtifactCache(artifactCacheDir)
+	if err != nil {
+		return nil, err
+	}
 
 	m := &Manager{
-		store:   store,
-		state:   state,
-		cancels: make(map[string]context.CancelFunc),
+		store:         store,
+		state:         state,
+		cancels:       make(map[string]context.CancelFunc),
+		artifactCache: cache,
 	}
 	return m, nil
 }
@@ -126,7 +133,7 @@ func (m *Manager) runTask(ctx context.Context, taskID string, run func(context.C
 		return
 	}
 
-	m.updateTask(taskID, func(task *Task, events *[]Event) {
+	_ = m.updateTask(taskID, func(task *Task, events *[]Event) {
 		if task.State == StateCanceled {
 			return
 		}
@@ -419,15 +426,47 @@ func (m *Manager) Snapshot() ([]Task, []Event) {
 	return tasks, events
 }
 
+func (m *Manager) ArtifactsSnapshot() []Artifact {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	artifacts := append([]Artifact(nil), m.state.Artifacts...)
+	sort.Slice(artifacts, func(i, j int) bool {
+		return artifacts[i].CreatedAt.After(artifacts[j].CreatedAt)
+	})
+	return artifacts
+}
+
+func (m *Manager) GetArtifact(taskID string, artifactID string) (*Artifact, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	taskID = strings.TrimSpace(taskID)
+	artifactID = strings.TrimSpace(artifactID)
+	for _, artifact := range m.state.Artifacts {
+		if artifact.ID != artifactID || artifact.TaskID != taskID {
+			continue
+		}
+		copyArtifact := artifact
+		return &copyArtifact, true
+	}
+	return nil, false
+}
+
 func (m *Manager) updateTask(taskID string, mutator func(task *Task, events *[]Event)) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	matched := false
 	for i := range m.state.Tasks {
 		if taskID != "" && m.state.Tasks[i].ID != taskID {
 			continue
 		}
+		matched = true
 		mutator(&m.state.Tasks[i], &m.state.Events)
+	}
+	if taskID != "" && !matched {
+		return fmt.Errorf("task %q not found", taskID)
 	}
 	return m.store.Save(m.state)
 }
@@ -461,6 +500,11 @@ func (m *Manager) Reset() error {
 	}
 	m.cancels = make(map[string]context.CancelFunc)
 	m.state = fileState{Version: 1}
+	if m.artifactCache != nil {
+		if err := m.artifactCache.reset(); err != nil {
+			return err
+		}
+	}
 
 	if m.store == nil {
 		return nil
@@ -518,6 +562,120 @@ func (r reporter) Event(eventType string, message string) error {
 		})
 		task.UpdatedAt = time.Now()
 	})
+}
+
+func (r reporter) PutArtifact(req plugin.PutArtifactRequest) (plugin.ArtifactRef, error) {
+	return r.manager.putArtifact(r.taskID, req)
+}
+
+func (r reporter) SetDeliverArtifacts(ids []string) error {
+	return r.manager.setDeliverArtifacts(r.taskID, ids)
+}
+
+func (m *Manager) putArtifact(taskID string, req plugin.PutArtifactRequest) (plugin.ArtifactRef, error) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return plugin.ArtifactRef{}, fmt.Errorf("task id is required")
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	req.Kind = strings.TrimSpace(req.Kind)
+	if req.Name == "" {
+		return plugin.ArtifactRef{}, fmt.Errorf("artifact name is required")
+	}
+	if req.Kind == "" {
+		return plugin.ArtifactRef{}, fmt.Errorf("artifact kind is required")
+	}
+
+	artifactID := m.nextID("artifact")
+	artifact, err := m.artifactCache.put(taskID, req, artifactID, m.nextID)
+	if err != nil {
+		return plugin.ArtifactRef{}, err
+	}
+	artifact.CreatedAt = time.Now()
+
+	var opErr error
+	if err := m.updateTask(taskID, func(task *Task, events *[]Event) {
+		if task.State != StateAccepted && task.State != StateRunning {
+			opErr = fmt.Errorf("task %q is not accepting new artifacts", taskID)
+			return
+		}
+		task.UpdatedAt = time.Now()
+		m.state.Artifacts = append(m.state.Artifacts, artifact)
+		*events = append(*events, Event{
+			ID:        m.nextID("event"),
+			TaskID:    taskID,
+			Type:      "artifact",
+			Message:   fmt.Sprintf("新增产物：%s", artifact.FileName),
+			CreatedAt: artifact.CreatedAt,
+		})
+	}); err != nil {
+		_ = os.Remove(artifact.StoragePath)
+		return plugin.ArtifactRef{}, err
+	}
+	if opErr != nil {
+		_ = os.Remove(artifact.StoragePath)
+		return plugin.ArtifactRef{}, opErr
+	}
+
+	return plugin.ArtifactRef{
+		ID:       artifact.ID,
+		TaskID:   artifact.TaskID,
+		Kind:     artifact.Kind,
+		FileName: artifact.FileName,
+		MIMEType: artifact.MIMEType,
+		Size:     artifact.SizeBytes,
+	}, nil
+}
+
+func (m *Manager) setDeliverArtifacts(taskID string, ids []string) error {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return fmt.Errorf("task id is required")
+	}
+
+	normalized := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		normalized[id] = struct{}{}
+	}
+
+	var opErr error
+	if err := m.updateTask(taskID, func(task *Task, events *[]Event) {
+		if task.State != StateAccepted && task.State != StateRunning {
+			opErr = fmt.Errorf("task %q is not accepting deliver artifact updates", taskID)
+			return
+		}
+
+		available := make(map[string]struct{})
+		for i := range m.state.Artifacts {
+			if m.state.Artifacts[i].TaskID != taskID {
+				continue
+			}
+			available[m.state.Artifacts[i].ID] = struct{}{}
+		}
+		for id := range normalized {
+			if _, ok := available[id]; !ok {
+				opErr = fmt.Errorf("artifact %q does not belong to task %q", id, taskID)
+				return
+			}
+		}
+
+		for i := range m.state.Artifacts {
+			if m.state.Artifacts[i].TaskID != taskID {
+				continue
+			}
+			_, shouldDeliver := normalized[m.state.Artifacts[i].ID]
+			m.state.Artifacts[i].Deliver = shouldDeliver
+		}
+		task.UpdatedAt = time.Now()
+		_ = events
+	}); err != nil {
+		return err
+	}
+	return opErr
 }
 
 func summarizeResult(result string) string {

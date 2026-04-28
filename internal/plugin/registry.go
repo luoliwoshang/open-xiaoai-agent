@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"sync"
@@ -40,6 +41,8 @@ type AsyncReporter interface {
 	TaskID() string
 	Update(summary string) error
 	Event(eventType string, message string) error
+	PutArtifact(req PutArtifactRequest) (ArtifactRef, error)
+	SetDeliverArtifacts(ids []string) error
 }
 
 type AsyncTask struct {
@@ -49,6 +52,23 @@ type AsyncTask struct {
 	Input        string
 	ParentTaskID string
 	Run          func(ctx context.Context, reporter AsyncReporter) (string, error)
+}
+
+type PutArtifactRequest struct {
+	Name     string
+	Kind     string
+	MIMEType string
+	Reader   io.Reader
+	Size     int64
+}
+
+type ArtifactRef struct {
+	ID       string
+	TaskID   string
+	Kind     string
+	FileName string
+	MIMEType string
+	Size     int64
 }
 
 type CallContext struct {

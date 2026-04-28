@@ -92,6 +92,38 @@ func (s *Store) Load() (fileState, error) {
 		return fileState{}, fmt.Errorf("iterate task event rows: %w", err)
 	}
 
+	artifactRows, err := s.db.Query(`
+		SELECT id, task_id, kind, file_name, mime_type, storage_path, size_bytes, deliver, created_at
+		FROM task_artifacts
+	`)
+	if err != nil {
+		return fileState{}, fmt.Errorf("query task artifacts: %w", err)
+	}
+	defer artifactRows.Close()
+
+	for artifactRows.Next() {
+		var artifact Artifact
+		var createdAt int64
+		if err := artifactRows.Scan(
+			&artifact.ID,
+			&artifact.TaskID,
+			&artifact.Kind,
+			&artifact.FileName,
+			&artifact.MIMEType,
+			&artifact.StoragePath,
+			&artifact.SizeBytes,
+			&artifact.Deliver,
+			&createdAt,
+		); err != nil {
+			return fileState{}, fmt.Errorf("scan task artifact row: %w", err)
+		}
+		artifact.CreatedAt = storage.TimeFromUnixMillis(createdAt)
+		state.Artifacts = append(state.Artifacts, artifact)
+	}
+	if err := artifactRows.Err(); err != nil {
+		return fileState{}, fmt.Errorf("iterate task artifact rows: %w", err)
+	}
+
 	return state, nil
 }
 
@@ -108,6 +140,9 @@ func (s *Store) Save(state fileState) error {
 
 	if _, err := tx.Exec(`DELETE FROM task_events`); err != nil {
 		return fmt.Errorf("clear task events: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM task_artifacts`); err != nil {
+		return fmt.Errorf("clear task artifacts: %w", err)
 	}
 	if _, err := tx.Exec(`DELETE FROM tasks`); err != nil {
 		return fmt.Errorf("clear tasks: %w", err)
@@ -162,6 +197,31 @@ func (s *Store) Save(state fileState) error {
 		}
 	}
 
+	artifactStmt, err := tx.Prepare(`
+		INSERT INTO task_artifacts (id, task_id, kind, file_name, mime_type, storage_path, size_bytes, deliver, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare task artifact insert: %w", err)
+	}
+	defer artifactStmt.Close()
+
+	for _, artifact := range state.Artifacts {
+		if _, err := artifactStmt.Exec(
+			artifact.ID,
+			artifact.TaskID,
+			artifact.Kind,
+			artifact.FileName,
+			artifact.MIMEType,
+			artifact.StoragePath,
+			artifact.SizeBytes,
+			artifact.Deliver,
+			storage.UnixMillis(artifact.CreatedAt),
+		); err != nil {
+			return fmt.Errorf("insert task artifact %q: %w", artifact.ID, err)
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit task save: %w", err)
 	}
@@ -181,6 +241,9 @@ func (s *Store) Reset() error {
 
 	if _, err := tx.Exec(`DELETE FROM task_events`); err != nil {
 		return fmt.Errorf("reset task events: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM task_artifacts`); err != nil {
+		return fmt.Errorf("reset task artifacts: %w", err)
 	}
 	if _, err := tx.Exec(`DELETE FROM tasks`); err != nil {
 		return fmt.Errorf("reset tasks: %w", err)

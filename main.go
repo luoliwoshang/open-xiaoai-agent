@@ -64,7 +64,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	taskManager, err := tasks.NewManager(dsn)
+	taskManager, err := tasks.NewManager(dsn, appConfig.Task.ArtifactCacheDir)
 	if err != nil {
 		log.Fatal(err)
 	}

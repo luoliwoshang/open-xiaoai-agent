@@ -109,6 +109,18 @@ func ensureSchema(db *sql.DB) error {
 			message LONGTEXT NOT NULL,
 			created_at BIGINT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS task_artifacts (
+			id VARCHAR(255) PRIMARY KEY,
+			task_id VARCHAR(255) NOT NULL,
+			kind VARCHAR(64) NOT NULL,
+			file_name VARCHAR(512) NOT NULL,
+			mime_type VARCHAR(255) NOT NULL,
+			storage_path LONGTEXT NOT NULL,
+			size_bytes BIGINT NOT NULL,
+			deliver BOOLEAN NOT NULL DEFAULT FALSE,
+			created_at BIGINT NOT NULL,
+			INDEX idx_task_artifacts_task_id (task_id)
+		)`,
 		`CREATE TABLE IF NOT EXISTS conversations (
 			id VARCHAR(255) PRIMARY KEY,
 			started_at BIGINT NOT NULL,

@@ -5,8 +5,13 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/assistant"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/im"
@@ -86,6 +91,7 @@ func (s *Server) ListenAndServe() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/healthz", s.handleHealth)
 	mux.HandleFunc("/api/state", s.handleState)
+	mux.HandleFunc("/api/tasks/", s.handleTaskArtifactDownload)
 	mux.HandleFunc("/api/logs", s.handleLogs)
 	mux.HandleFunc("/api/settings", s.handleSettings)
 	mux.HandleFunc("/api/settings/session", s.handleSessionSettings)
@@ -107,7 +113,13 @@ func (s *Server) ListenAndServe() error {
 }
 
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
-	tasksList, events := s.tasks.Snapshot()
+	tasksList := []tasks.Task(nil)
+	events := []tasks.Event(nil)
+	artifacts := []tasks.Artifact(nil)
+	if s.tasks != nil {
+		tasksList, events = s.tasks.Snapshot()
+		artifacts = s.tasks.ArtifactsSnapshot()
+	}
 	claudeRecords := []complextask.Record(nil)
 	if s.claude != nil {
 		claudeRecords = s.claude.Snapshot()
@@ -127,11 +139,71 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"tasks":          tasksList,
 		"events":         events,
+		"artifacts":      artifacts,
 		"claude_records": claudeRecords,
 		"conversations":  conversations,
 		"settings":       runtimeSettings,
 		"im":             imState,
 	})
+}
+
+func (s *Server) handleTaskArtifactDownload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/api/tasks/")
+	parts := strings.Split(path, "/")
+	if len(parts) != 4 || parts[1] != "artifacts" || parts[3] != "download" {
+		http.NotFound(w, r)
+		return
+	}
+
+	taskID := strings.TrimSpace(parts[0])
+	artifactID := strings.TrimSpace(parts[2])
+	if taskID == "" || artifactID == "" {
+		http.NotFound(w, r)
+		return
+	}
+	if s.tasks == nil {
+		http.Error(w, "task manager is not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	artifact, ok := s.tasks.GetArtifact(taskID, artifactID)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
+	file, err := os.Open(artifact.StoragePath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("open artifact: %v", err), http.StatusNotFound)
+		return
+	}
+	defer file.Close()
+
+	mimeType := strings.TrimSpace(artifact.MIMEType)
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Disposition", buildAttachmentDisposition(artifact.FileName))
+	http.ServeContent(w, r, artifact.FileName, artifact.CreatedAt, file)
+}
+
+func buildAttachmentDisposition(fileName string) string {
+	fileName = strings.TrimSpace(fileName)
+	if fileName == "" {
+		fileName = "artifact"
+	}
+	if value := mime.FormatMediaType("attachment", map[string]string{"filename": filepath.Base(fileName)}); value != "" {
+		return value
+	}
+	return "attachment; filename*=UTF-8''" + url.PathEscape(filepath.Base(fileName))
 }
 
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {

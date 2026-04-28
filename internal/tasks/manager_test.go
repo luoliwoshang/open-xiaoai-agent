@@ -13,7 +13,7 @@ import (
 func TestManagerSubmitCompletesAndReports(t *testing.T) {
 	t.Helper()
 
-	manager, err := NewManager(testmysql.NewDSN(t))
+	manager, err := NewManager(testmysql.NewDSN(t), t.TempDir())
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
@@ -69,7 +69,7 @@ func TestManagerSubmitCompletesAndReports(t *testing.T) {
 func TestManagerCancelLatest(t *testing.T) {
 	t.Helper()
 
-	manager, err := NewManager(testmysql.NewDSN(t))
+	manager, err := NewManager(testmysql.NewDSN(t), t.TempDir())
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
@@ -121,7 +121,7 @@ func TestManagerCancelLatest(t *testing.T) {
 func TestCompletedTasksForIntentIncludesPluginSummary(t *testing.T) {
 	t.Helper()
 
-	manager, err := NewManager(testmysql.NewDSN(t))
+	manager, err := NewManager(testmysql.NewDSN(t), t.TempDir())
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
@@ -149,7 +149,7 @@ func TestCompletedTasksForIntentIncludesPluginSummary(t *testing.T) {
 func TestSnapshotFiltersClaudeOutputEvents(t *testing.T) {
 	t.Helper()
 
-	manager, err := NewManager(testmysql.NewDSN(t))
+	manager, err := NewManager(testmysql.NewDSN(t), t.TempDir())
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
@@ -184,7 +184,7 @@ func TestSnapshotFiltersClaudeOutputEvents(t *testing.T) {
 func TestSummarizeProgressIncludesStateAndSummary(t *testing.T) {
 	t.Helper()
 
-	manager, err := NewManager(testmysql.NewDSN(t))
+	manager, err := NewManager(testmysql.NewDSN(t), t.TempDir())
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
@@ -210,7 +210,7 @@ func TestSummarizeProgressIncludesStateAndSummary(t *testing.T) {
 func TestManagerResetClearsTasksAndEvents(t *testing.T) {
 	t.Helper()
 
-	manager, err := NewManager(testmysql.NewDSN(t))
+	manager, err := NewManager(testmysql.NewDSN(t), t.TempDir())
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
@@ -243,6 +243,97 @@ func TestManagerResetClearsTasksAndEvents(t *testing.T) {
 	}
 	if len(events) != 0 {
 		t.Fatalf("len(events) = %d, want 0", len(events))
+	}
+}
+
+func TestManagerPutArtifactAndDownloadMetadata(t *testing.T) {
+	t.Helper()
+
+	manager, err := NewManager(testmysql.NewDSN(t), t.TempDir())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	task, err := manager.Submit(plugin.AsyncTask{
+		Plugin: "artifact_test",
+		Kind:   "artifact_test",
+		Title:  "产物测试",
+		Input:  "生成一个测试文件",
+		Run: func(ctx context.Context, reporter plugin.AsyncReporter) (string, error) {
+			artifact, err := reporter.PutArtifact(plugin.PutArtifactRequest{
+				Name:     "story.txt",
+				Kind:     "file",
+				MIMEType: "text/plain",
+				Reader:   strings.NewReader("hello artifact"),
+				Size:     int64(len("hello artifact")),
+			})
+			if err != nil {
+				return "", err
+			}
+			if err := reporter.SetDeliverArtifacts([]string{artifact.ID}); err != nil {
+				return "", err
+			}
+			return "测试文件已经准备好了。", nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+
+	completed := waitForTaskState(t, manager, task.ID, StateCompleted)
+	if completed.Result != "测试文件已经准备好了。" {
+		t.Fatalf("completed.Result = %q", completed.Result)
+	}
+
+	artifacts := manager.ArtifactsSnapshot()
+	if len(artifacts) != 1 {
+		t.Fatalf("len(artifacts) = %d, want 1", len(artifacts))
+	}
+	if artifacts[0].TaskID != task.ID {
+		t.Fatalf("artifacts[0].TaskID = %q, want %q", artifacts[0].TaskID, task.ID)
+	}
+	if !artifacts[0].Deliver {
+		t.Fatal("artifacts[0].Deliver = false, want true")
+	}
+	if got := strings.TrimSpace(artifacts[0].StoragePath); got == "" {
+		t.Fatal("artifacts[0].StoragePath = empty")
+	}
+	if _, ok := manager.GetArtifact(task.ID, artifacts[0].ID); !ok {
+		t.Fatal("GetArtifact() = not found, want artifact")
+	}
+}
+
+func TestManagerRejectsArtifactUpdatesAfterCompletion(t *testing.T) {
+	t.Helper()
+
+	manager, err := NewManager(testmysql.NewDSN(t), t.TempDir())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	task, err := manager.Submit(plugin.AsyncTask{
+		Plugin: "artifact_test",
+		Kind:   "artifact_test",
+		Title:  "完成后禁止追加产物",
+		Input:  "先完成再试着上报",
+		Run: func(ctx context.Context, reporter plugin.AsyncReporter) (string, error) {
+			return "任务完成。", nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+
+	waitForTaskState(t, manager, task.ID, StateCompleted)
+	_, err = reporter{manager: manager, taskID: task.ID}.PutArtifact(plugin.PutArtifactRequest{
+		Name:     "late.txt",
+		Kind:     "file",
+		MIMEType: "text/plain",
+		Reader:   strings.NewReader("late"),
+		Size:     int64(len("late")),
+	})
+	if err == nil {
+		t.Fatal("PutArtifact() after completion error = nil, want non-nil")
 	}
 }
 

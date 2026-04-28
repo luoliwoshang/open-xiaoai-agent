@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
 import { postJSON } from '../lib/api'
-import { countByState, formatTime, latest, normalizeSettings, stateLabels } from '../lib/dashboard'
+import { countByState, formatBytes, formatTime, latest, normalizeSettings, stateLabels } from '../lib/dashboard'
 import type {
   ClaudeRecord,
   ConversationSnapshot,
@@ -72,6 +72,10 @@ export function DashboardPage({ data, loading, error, setData }: Props) {
   const selectedTask =
     data.tasks.find((task) => task.id === selectedTaskId) ?? heroTask ?? null
   const selectedEvents = selectedTask ? eventsByTask.get(selectedTask.id) ?? [] : []
+  const selectedArtifacts = useMemo(() => {
+    if (!selectedTask) return []
+    return data.artifacts.filter((artifact) => artifact.task_id === selectedTask.id)
+  }, [data.artifacts, selectedTask])
   const claudeRecord = useMemo<ClaudeRecord | null>(() => {
     if (!selectedTask) return null
     return data.claude_records.find((record) => record.task_id === selectedTask.id) ?? null
@@ -332,6 +336,37 @@ export function DashboardPage({ data, loading, error, setData }: Props) {
                       </div>
                     ) : null}
                   </div>
+                </article>
+
+                <article className="focus-card">
+                  <div className="focus-card-head">
+                    <div>
+                      <p className="eyebrow">TASK ARTIFACTS</p>
+                      <h3>任务产物</h3>
+                    </div>
+                    <span className="panel-meta">{selectedArtifacts.length} 个文件</span>
+                  </div>
+
+                  {selectedArtifacts.length > 0 ? (
+                    <div className="focus-grid">
+                      {selectedArtifacts.map((artifact) => (
+                        <div className="task-meta task-meta-wide" key={artifact.id}>
+                          <span>{artifact.kind}{artifact.deliver ? ' · 已标记交付' : ''}</span>
+                          <p>{artifact.file_name}</p>
+                          <p>{artifact.mime_type || 'application/octet-stream'} · {formatBytes(artifact.size_bytes)} · {formatTime(artifact.created_at)}</p>
+                          <p>
+                            <a
+                              href={`/api/tasks/${encodeURIComponent(artifact.task_id)}/artifacts/${encodeURIComponent(artifact.id)}/download`}
+                            >
+                              下载产物
+                            </a>
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="empty-card">这个任务当前还没有产物。</div>
+                  )}
                 </article>
 
                 <article className="focus-card focus-card-plugin">

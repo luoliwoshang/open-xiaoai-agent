@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -233,7 +234,7 @@ func TestHandleResetClearsRuntimeData(t *testing.T) {
 	t.Parallel()
 
 	dsn := testmysql.NewDSN(t)
-	manager, err := tasks.NewManager(dsn)
+	manager, err := tasks.NewManager(dsn, t.TempDir())
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
@@ -546,6 +547,75 @@ func TestHandleIMDebugSendFileDefaultUsesUploadedFile(t *testing.T) {
 	}
 	if payload.Receipt.MediaFileName != "story.txt" {
 		t.Fatalf("MediaFileName = %q, want story.txt", payload.Receipt.MediaFileName)
+	}
+}
+
+func TestHandleTaskArtifactDownloadServesSavedArtifact(t *testing.T) {
+	t.Parallel()
+
+	dsn := testmysql.NewDSN(t)
+	manager, err := tasks.NewManager(dsn, t.TempDir())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	task, err := manager.Submit(plugin.AsyncTask{
+		Plugin: "artifact_test",
+		Kind:   "artifact_test",
+		Title:  "下载测试",
+		Input:  "生成一个可下载文件",
+		Run: func(ctx context.Context, reporter plugin.AsyncReporter) (string, error) {
+			artifact, err := reporter.PutArtifact(plugin.PutArtifactRequest{
+				Name:     "story.txt",
+				Kind:     "file",
+				MIMEType: "text/plain",
+				Reader:   strings.NewReader("download-me"),
+				Size:     int64(len("download-me")),
+			})
+			if err != nil {
+				return "", err
+			}
+			if err := reporter.SetDeliverArtifacts([]string{artifact.ID}); err != nil {
+				return "", err
+			}
+			return "文件已经就绪。", nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+
+	var artifact tasks.Artifact
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		artifacts := manager.ArtifactsSnapshot()
+		if len(artifacts) == 1 {
+			artifact = artifacts[0]
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if artifact.ID == "" {
+		t.Fatal("artifact not found before timeout")
+	}
+
+	server := New(":0", manager, nil, nil, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeIM{}, &fakeLogs{})
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/tasks/%s/artifacts/%s/download", task.ID, artifact.ID), nil)
+	recorder := httptest.NewRecorder()
+
+	server.handleTaskArtifactDownload(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if body := recorder.Body.String(); body != "download-me" {
+		t.Fatalf("body = %q, want %q", body, "download-me")
+	}
+	if got := recorder.Header().Get("Content-Type"); got != "text/plain" {
+		t.Fatalf("Content-Type = %q, want %q", got, "text/plain")
+	}
+	if got := recorder.Header().Get("Content-Disposition"); !strings.Contains(got, "story.txt") {
+		t.Fatalf("Content-Disposition = %q, want contains story.txt", got)
 	}
 }
 

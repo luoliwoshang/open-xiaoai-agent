@@ -27,6 +27,18 @@ type Task struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
+type Artifact struct {
+	ID          string    `json:"id"`
+	TaskID      string    `json:"task_id"`
+	Kind        string    `json:"kind"`
+	FileName    string    `json:"file_name"`
+	MIMEType    string    `json:"mime_type"`
+	StoragePath string    `json:"-"`
+	SizeBytes   int64     `json:"size_bytes"`
+	Deliver     bool      `json:"deliver"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 type PendingReportItem struct {
 	ID      string `json:"id"`
 	Title   string `json:"title"`
@@ -44,7 +56,8 @@ type Event struct {
 }
 
 type fileState struct {
-	Version int     `json:"version"`
-	Tasks   []Task  `json:"tasks"`
-	Events  []Event `json:"events"`
+	Version   int        `json:"version"`
+	Tasks     []Task     `json:"tasks"`
+	Events    []Event    `json:"events"`
+	Artifacts []Artifact `json:"artifacts"`
 }

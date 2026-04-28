@@ -152,6 +152,7 @@ Common backend flags from `main.go`:
 Config domains currently used:
 
 - `database.dsn`
+- `task.artifact_cache_dir`
 - `openai.base_url`
 - `intent.model / base_url / api_key`
 - `reply.model / base_url / api_key`
@@ -171,6 +172,7 @@ This project currently uses MySQL persistence.
 Logical stores:
 
 - generic async task records + task events
+- task artifact metadata
 - sliding-window conversation history
 - Claude plugin private state
 - runtime settings such as `session.window_seconds`
@@ -183,7 +185,15 @@ Generic task store:
 
 - generic task table
 - generic task events
+- task artifact table
 - does not store plugin-specific execution internals such as Claude session ids
+
+Task artifact cache:
+
+- task-produced files are cached on local disk
+- cache directory comes from `config.yaml` field `task.artifact_cache_dir`
+- current default is `.cache/task-artifacts` under the repo root
+- plugins report artifact content and metadata, not raw local file paths across the task-system boundary
 
 Conversation store:
 
@@ -359,6 +369,13 @@ Task records contain generic fields such as:
 - `report_pending`
 - timestamps
 
+Task artifacts are intentionally separate from the task row:
+
+- artifacts belong to the current `task_id`
+- current phase does not build parent/root task artifact aggregation views
+- once a task reaches `completed`, it should not accept new artifacts
+- plugins can mark which artifacts are intended for later delivery without introducing delivery-status tracking yet
+
 Important behavioral decisions:
 
 - async task completion does not proactively start a new reply
@@ -460,6 +477,7 @@ Important routes:
 - `GET /api/healthz`
 - `GET /api/logs`
 - `GET /api/state`
+- `GET /api/tasks/{taskID}/artifacts/{artifactID}/download`
 - `GET /api/settings`
 - `POST /api/settings/session`
 - `POST /api/settings/im-delivery`
@@ -468,6 +486,7 @@ Important routes:
 - `POST /api/im/wechat/login/confirm`
 - `POST /api/im/debug/send-default`
 - `POST /api/im/debug/send-image-default`
+- `POST /api/im/debug/send-file-default`
 - `POST /api/im/targets`
 - `POST /api/im/targets/default`
 - `POST /api/im/targets/delete`
