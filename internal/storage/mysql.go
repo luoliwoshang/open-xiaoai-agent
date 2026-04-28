@@ -170,6 +170,15 @@ func ensureSchema(db *sql.DB) error {
 			message LONGTEXT NOT NULL,
 			created_at BIGINT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS runtime_logs (
+			id VARCHAR(255) PRIMARY KEY,
+			level VARCHAR(32) NOT NULL,
+			source VARCHAR(255) NOT NULL,
+			message LONGTEXT NOT NULL,
+			raw LONGTEXT NOT NULL,
+			created_at BIGINT NOT NULL,
+			INDEX idx_runtime_logs_created_at (created_at)
+		)`,
 	}
 
 	for _, statement := range statements {

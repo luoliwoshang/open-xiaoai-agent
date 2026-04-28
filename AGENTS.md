@@ -24,6 +24,7 @@ Current responsibilities:
 - drive local TTS playback on the device through the existing client protocol
 - maintain lightweight async tasks
 - provide phase-1 IM gateway capability for WeChat text delivery plus default-channel image debug send
+- persist backend runtime logs and expose them through the dashboard API
 - expose a React dashboard over API + web frontend
 
 Current non-goals / known missing pieces:
@@ -89,6 +90,10 @@ Only the high-signal parts are listed here.
   - single text playback + streamed chunk playback
 - `internal/dashboard`
   - API side for dashboard state
+- `internal/logs`
+  - backend runtime log persistence
+  - standard logger capture
+  - paginated log listing
 - `internal/im`
   - phase-1 IM gateway
   - WeChat login / account / target / mirror delivery
@@ -169,6 +174,7 @@ Logical stores:
 - sliding-window conversation history
 - Claude plugin private state
 - runtime settings such as `session.window_seconds`
+- backend runtime logs
 - IM gateway accounts / targets / events
 
 ### Meaning of Each Store
@@ -209,6 +215,17 @@ Media cache:
 - cache directory comes from `config.yaml` field `im.media_cache_dir`
 - current default is `.cache/im-media` under the repo root
 - files are intentionally not auto-cleaned yet
+
+Runtime log store:
+
+- backend standard logger output is persisted to MySQL
+- each log row keeps:
+  - timestamp
+  - inferred level
+  - source file/line when available
+  - parsed message
+  - raw formatted line
+- dashboard reads logs through a dedicated paginated API
 
 Claude-private store:
 
@@ -441,6 +458,7 @@ Go provides the dashboard API only.
 Important routes:
 
 - `GET /api/healthz`
+- `GET /api/logs`
 - `GET /api/state`
 - `GET /api/settings`
 - `POST /api/settings/session`
@@ -464,6 +482,7 @@ UI decisions that were explicitly requested:
 - task event flow belongs to a selected task
 - conversation history is shown separately
 - settings should live on a separate settings page
+- backend logs should live on their own page and not be mixed into `/api/state`
 - dashboard should feel intentional, not generic admin boilerplate
 
 ## Testing

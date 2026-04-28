@@ -3,12 +3,16 @@ import type { DashboardState } from '../types'
 import { fetchState } from '../lib/api'
 import { emptyState } from '../lib/dashboard'
 
-export function useDashboardState() {
+export function useDashboardState(enabled = true) {
   const [data, setData] = useState<DashboardState>(emptyState)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    if (!enabled) {
+      return
+    }
+
     let active = true
 
     async function refreshWithGuard() {
@@ -36,7 +40,7 @@ export function useDashboardState() {
       active = false
       window.clearInterval(timer)
     }
-  }, [])
+  }, [enabled])
 
   async function refresh() {
     const next = await fetchState()
@@ -53,4 +57,3 @@ export function useDashboardState() {
     refresh,
   }
 }
-

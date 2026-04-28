@@ -6,7 +6,7 @@ import type {
   TaskState,
 } from '../types'
 
-export type Page = 'dashboard' | 'settings'
+export type Page = 'dashboard' | 'settings' | 'logs'
 
 export const emptyState: DashboardState = {
   tasks: [],
@@ -56,7 +56,14 @@ export function latest<T extends { created_at?: string; updated_at?: string }>(i
 }
 
 export function currentPageFromHash(): Page {
-  return window.location.hash === '#/settings' ? 'settings' : 'dashboard'
+  switch (window.location.hash) {
+    case '#/settings':
+      return 'settings'
+    case '#/logs':
+      return 'logs'
+    default:
+      return 'dashboard'
+  }
 }
 
 export function selectBestTarget(targets: IMTarget[], accountID: string) {
@@ -90,4 +97,3 @@ export function normalizeSettings(raw: Partial<SettingsSnapshot> | undefined): S
     im_selected_target_id: raw?.im_selected_target_id ?? '',
   }
 }
-

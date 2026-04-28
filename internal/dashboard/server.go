@@ -6,9 +6,11 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/assistant"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/im"
+	runtimelogs "github.com/luoliwoshang/open-xiaoai-agent/internal/logs"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugins/complextask"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/settings"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/tasks"
@@ -40,6 +42,9 @@ type Server struct {
 		UpdateDeliveryConfig(enabled bool, accountID string, targetID string) (settings.Snapshot, error)
 		Reset() error
 	}
+	logs interface {
+		List(query runtimelogs.ListQuery) (runtimelogs.ListPage, error)
+	}
 }
 
 func New(addr string, tasks *tasks.Manager, claude *complextask.Service, conversations interface {
@@ -61,6 +66,8 @@ func New(addr string, tasks *tasks.Manager, claude *complextask.Service, convers
 	DeleteAccount(accountID string) error
 	UpdateDeliveryConfig(enabled bool, accountID string, targetID string) (settings.Snapshot, error)
 	Reset() error
+}, logStore interface {
+	List(query runtimelogs.ListQuery) (runtimelogs.ListPage, error)
 }) *Server {
 	return &Server{
 		addr:          addr,
@@ -69,6 +76,7 @@ func New(addr string, tasks *tasks.Manager, claude *complextask.Service, convers
 		conversations: conversations,
 		settings:      runtimeSettings,
 		im:            imGateway,
+		logs:          logStore,
 	}
 }
 
@@ -76,6 +84,7 @@ func (s *Server) ListenAndServe() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/healthz", s.handleHealth)
 	mux.HandleFunc("/api/state", s.handleState)
+	mux.HandleFunc("/api/logs", s.handleLogs)
 	mux.HandleFunc("/api/settings", s.handleSettings)
 	mux.HandleFunc("/api/settings/session", s.handleSessionSettings)
 	mux.HandleFunc("/api/settings/im-delivery", s.handleIMDeliverySettings)
@@ -120,6 +129,54 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		"settings":       runtimeSettings,
 		"im":             imState,
 	})
+}
+
+func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.logs == nil {
+		http.Error(w, "runtime logs are not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	page := 1
+	if raw := r.URL.Query().Get("page"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("invalid page: %v", err), http.StatusBadRequest)
+			return
+		}
+		page = value
+	}
+
+	pageSize := runtimelogs.DefaultPageSize
+	if raw := r.URL.Query().Get("page_size"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("invalid page_size: %v", err), http.StatusBadRequest)
+			return
+		}
+		pageSize = value
+	}
+
+	query, err := runtimelogs.NormalizeQuery(runtimelogs.ListQuery{
+		Page:     page,
+		PageSize: pageSize,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	logPage, err := s.logs.List(query)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, logPage)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

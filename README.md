@@ -76,6 +76,7 @@ flowchart TD
 - 使用 `reply` 模型流式生成回复，并通过设备侧 TTS 播放
 - 管理轻量异步任务，并在后续对话中补报进度
 - 提供独立的 React + Vite dashboard
+- 提供后端日志中心，可在管理界面分页查看 Go server 日志
 - 使用 MySQL 保存任务、会话和插件私有状态
 - 会话上下文默认使用滑动窗口，并支持在 Dashboard 中调整窗口秒数
 - 提供第一期独立 IM Gateway：支持微信扫码登录、确认添加账号、多账号管理、文本触达配置，以及默认渠道的文本 / 图片调试发送
@@ -182,6 +183,7 @@ npm run dev
 - Dashboard API: `:8090`
 - Web dashboard: `http://127.0.0.1:5173/#/`
 - Settings page: `http://127.0.0.1:5173/#/settings`
+- Logs page: `http://127.0.0.1:5173/#/logs`
 
 如果只启动后端：
 
@@ -251,6 +253,7 @@ npm run build:web
 Go 后端只提供 API，前端位于 `web/`。
 
 - `GET /api/healthz`
+- `GET /api/logs`
 - `GET /api/state`
 - `GET /api/settings`
 - `POST /api/settings/session`
@@ -276,7 +279,7 @@ npm run build:web
 
 - 当前 IM Gateway 第一期只做微信文本触达
 - 还没有 IM 入站会话
-- 还没有媒体发送
+- 还没有自动媒体镜像或更通用的媒体投递编排
 - 还没有群聊路由
 - 还没有完善的人声打断检测
 - 当前依赖外部 MySQL 服务
