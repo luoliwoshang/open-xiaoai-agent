@@ -260,6 +260,28 @@ func (s *Service) UpdateDeliveryConfig(enabled bool, accountID string, targetID 
 	return s.settings.UpdateIMDelivery(enabled, accountID, targetID)
 }
 
+func (s *Service) SendTextToDefaultChannel(text string) (DeliveryReceipt, error) {
+	if s == nil || s.store == nil || s.settings == nil {
+		return DeliveryReceipt{}, fmt.Errorf("im service is not configured")
+	}
+
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return DeliveryReceipt{}, fmt.Errorf("debug text is required")
+	}
+
+	cfg := s.settings.Snapshot()
+	if strings.TrimSpace(cfg.IMSelectedAccountID) == "" || strings.TrimSpace(cfg.IMSelectedTargetID) == "" {
+		return DeliveryReceipt{}, fmt.Errorf("默认渠道尚未配置，请先保存账号和触达目标")
+	}
+
+	return s.deliverText(deliveryRequest{
+		AccountID: cfg.IMSelectedAccountID,
+		TargetID:  cfg.IMSelectedTargetID,
+		Text:      text,
+	})
+}
+
 func (s *Service) Reset() error {
 	if s == nil || s.store == nil {
 		return nil
@@ -309,49 +331,55 @@ func (s *Service) MirrorText(text string) {
 
 func (s *Service) runDeliveryLoop() {
 	for request := range s.deliveries {
-		if err := s.deliverText(request); err != nil {
+		if _, err := s.deliverText(request); err != nil {
 			log.Printf("im mirror delivery failed: account=%s target=%s err=%v", request.AccountID, request.TargetID, err)
 		}
 	}
 }
 
-func (s *Service) deliverText(request deliveryRequest) error {
+func (s *Service) deliverText(request deliveryRequest) (DeliveryReceipt, error) {
 	account, ok, err := s.store.GetAccount(request.AccountID)
 	if err != nil {
-		return err
+		return DeliveryReceipt{}, err
 	}
 	if !ok {
-		return fmt.Errorf("im account %q not found", request.AccountID)
+		return DeliveryReceipt{}, fmt.Errorf("im account %q not found", request.AccountID)
 	}
 
 	target, ok, err := s.store.GetTarget(request.TargetID)
 	if err != nil {
-		return err
+		return DeliveryReceipt{}, err
 	}
 	if !ok {
-		return fmt.Errorf("im target %q not found", request.TargetID)
+		return DeliveryReceipt{}, fmt.Errorf("im target %q not found", request.TargetID)
 	}
 	if target.AccountID != account.ID {
-		return fmt.Errorf("im target %q does not belong to account %q", target.ID, account.ID)
+		return DeliveryReceipt{}, fmt.Errorf("im target %q does not belong to account %q", target.ID, account.ID)
 	}
 
 	adapter, ok := s.adapters[account.Platform]
 	if !ok {
-		return fmt.Errorf("im adapter %q is not configured", account.Platform)
+		return DeliveryReceipt{}, fmt.Errorf("im adapter %q is not configured", account.Platform)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	if _, err := adapter.SendText(ctx, account, target, request.Text); err != nil {
+	result, err := adapter.SendText(ctx, account, target, request.Text)
+	if err != nil {
 		_ = s.store.MarkDeliveryFailure(account.ID, err.Error())
 		_ = s.store.AppendEvent(account.ID, "send_failed", fmt.Sprintf("发送到 %s 失败：%s", target.Name, err.Error()))
-		return err
+		return DeliveryReceipt{}, err
 	}
 
 	_ = s.store.MarkDeliverySuccess(account.ID)
 	_ = s.store.AppendEvent(account.ID, "send", fmt.Sprintf("已发送到 %s：%s", target.Name, trimForEvent(request.Text)))
-	return nil
+	return DeliveryReceipt{
+		Account:   account,
+		Target:    target,
+		MessageID: result.MessageID,
+		Text:      request.Text,
+	}, nil
 }
 
 func (s *Service) repairDeliveryConfigAfterMutation(accountID string, targetID string) error {

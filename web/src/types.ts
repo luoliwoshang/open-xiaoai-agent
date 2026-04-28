@@ -104,6 +104,13 @@ export type IMSnapshot = {
   events: IMEvent[]
 }
 
+export type IMDeliveryReceipt = {
+  account: IMAccount
+  target: IMTarget
+  message_id: string
+  text: string
+}
+
 export type WeChatLoginStart = {
   session_key: string
   qr_raw_text: string

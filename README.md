@@ -78,7 +78,7 @@ flowchart TD
 - 提供独立的 React + Vite dashboard
 - 使用 MySQL 保存任务、会话和插件私有状态
 - 会话上下文默认使用滑动窗口，并支持在 Dashboard 中调整窗口秒数
-- 提供第一期独立 IM Gateway：支持微信扫码登录、确认添加账号、多账号管理、文本触达配置
+- 提供第一期独立 IM Gateway：支持微信扫码登录、确认添加账号、多账号管理、文本触达配置和默认渠道调试发送
 - 支持把小爱的正常回复异步镜像到选中的微信私聊目标，不阻塞设备侧播报
 
 当前内置工具：
@@ -254,6 +254,7 @@ Go 后端只提供 API，前端位于 `web/`。
 - `POST /api/im/wechat/login/start`
 - `GET /api/im/wechat/login/status`
 - `POST /api/im/wechat/login/confirm`
+- `POST /api/im/debug/send-default`
 - `POST /api/im/targets`
 - `POST /api/im/targets/default`
 - `POST /api/im/targets/delete`

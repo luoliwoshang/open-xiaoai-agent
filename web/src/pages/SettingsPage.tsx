@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
+import { IMDebugSendPanel } from '../components/settings/IMDebugSendPanel'
 import { IMDeliveryPanel } from '../components/settings/IMDeliveryPanel'
 import { IMTargetsPanel } from '../components/settings/IMTargetsPanel'
 import { SessionSettingsPanel } from '../components/settings/SessionSettingsPanel'
@@ -8,6 +9,7 @@ import { postJSON } from '../lib/api'
 import { normalizeSettings, selectBestTarget } from '../lib/dashboard'
 import type {
   DashboardState,
+  IMDeliveryReceipt,
   SessionSettings,
   SettingsSnapshot,
   WeChatLoginCandidate,
@@ -91,6 +93,10 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
   const [deliverySaving, setDeliverySaving] = useState(false)
   const [deliveryFeedback, setDeliveryFeedback] = useState<string | null>(null)
   const [deliveryError, setDeliveryError] = useState<string | null>(null)
+  const [debugText, setDebugText] = useState('')
+  const [debugSending, setDebugSending] = useState(false)
+  const [debugFeedback, setDebugFeedback] = useState<string | null>(null)
+  const [debugError, setDebugError] = useState<string | null>(null)
 
   const [loginPanel, setLoginPanel] = useState<LoginPanelState>(emptyLoginState)
 
@@ -110,6 +116,18 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
   const deliveryTargets = useMemo(() => {
     return data.im.targets.filter((target) => target.account_id === deliveryAccountID)
   }, [data.im.targets, deliveryAccountID])
+
+  const savedDebugAccount = useMemo(() => {
+    return data.im.accounts.find((account) => account.id === data.settings.im_selected_account_id) ?? null
+  }, [data.im.accounts, data.settings.im_selected_account_id])
+
+  const savedDebugTarget = useMemo(() => {
+    const target = data.im.targets.find((item) => item.id === data.settings.im_selected_target_id) ?? null
+    if (!target || !savedDebugAccount || target.account_id !== savedDebugAccount.id) {
+      return null
+    }
+    return target
+  }, [data.im.targets, data.settings.im_selected_target_id, savedDebugAccount])
 
   const targetFormTargets = useMemo(() => {
     return data.im.targets.filter((target) => target.account_id === targetAccountID)
@@ -387,6 +405,34 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
     }
   }
 
+  async function sendDebugText() {
+    if (!debugText.trim()) {
+      setDebugError('请输入要发送的测试文本。')
+      setDebugFeedback(null)
+      return
+    }
+
+    setDebugSending(true)
+    setDebugError(null)
+    setDebugFeedback(null)
+    try {
+      const payload = await postJSON<{ receipt?: IMDeliveryReceipt }>('/api/im/debug/send-default', {
+        text: debugText,
+      })
+      await refresh()
+      setDebugText('')
+      if (payload.receipt) {
+        setDebugFeedback(`测试消息已发送到 ${payload.receipt.account.display_name || payload.receipt.account.remote_account_id} / ${payload.receipt.target.name}。`)
+      } else {
+        setDebugFeedback('测试消息发送成功。')
+      }
+    } catch (err) {
+      setDebugError(err instanceof Error ? err.message : '发送测试消息失败')
+    } finally {
+      setDebugSending(false)
+    }
+  }
+
   return (
     <main className="settings-page">
       <section className="settings-hero-card">
@@ -500,6 +546,22 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
                   setDeliveryDirty(true)
                   setDeliveryFeedback(null)
                   setDeliveryError(null)
+                }}
+              />
+
+              <IMDebugSendPanel
+                account={savedDebugAccount}
+                configDirty={deliveryDirty}
+                error={debugError}
+                feedback={debugFeedback}
+                sending={debugSending}
+                target={savedDebugTarget}
+                text={debugText}
+                onSend={() => void sendDebugText()}
+                onTextChange={(value) => {
+                  setDebugText(value)
+                  setDebugFeedback(null)
+                  setDebugError(null)
                 }}
               />
 

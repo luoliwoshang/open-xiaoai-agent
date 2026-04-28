@@ -156,6 +156,52 @@ func TestServiceConfirmWeChatLoginPersistsAccountAfterExplicitConfirmation(t *te
 	}
 }
 
+func TestServiceSendTextToDefaultChannelUsesSavedSelectionEvenWhenMirrorDisabled(t *testing.T) {
+	t.Parallel()
+
+	dsn := testmysql.NewDSN(t)
+	settingsStore, err := settings.NewStore(dsn)
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	service, err := NewService(dsn, settingsStore)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+
+	adapter := &stubAdapter{}
+	service.adapters["stub"] = adapter
+
+	account, err := service.store.UpsertAccount("stub", "bot@im.bot", "user@im.wechat", "Bot", "https://example.com", "token")
+	if err != nil {
+		t.Fatalf("UpsertAccount() error = %v", err)
+	}
+	target, err := service.store.UpsertTarget(account.ID, "我的微信", "user@im.wechat", true)
+	if err != nil {
+		t.Fatalf("UpsertTarget() error = %v", err)
+	}
+	if _, err := service.UpdateDeliveryConfig(false, account.ID, target.ID); err != nil {
+		t.Fatalf("UpdateDeliveryConfig() error = %v", err)
+	}
+
+	receipt, err := service.SendTextToDefaultChannel("调试消息")
+	if err != nil {
+		t.Fatalf("SendTextToDefaultChannel() error = %v", err)
+	}
+	if receipt.Account.ID != account.ID {
+		t.Fatalf("receipt.Account.ID = %q, want %q", receipt.Account.ID, account.ID)
+	}
+	if receipt.Target.ID != target.ID {
+		t.Fatalf("receipt.Target.ID = %q, want %q", receipt.Target.ID, target.ID)
+	}
+	if receipt.Text != "调试消息" {
+		t.Fatalf("receipt.Text = %q, want 调试消息", receipt.Text)
+	}
+	if adapter.sentCount() != 1 {
+		t.Fatalf("sentCount() = %d, want 1", adapter.sentCount())
+	}
+}
+
 func TestServiceMirrorTextUpdatesDeliverySuccess(t *testing.T) {
 	t.Parallel()
 

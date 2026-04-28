@@ -62,6 +62,8 @@ type fakeIM struct {
 	lastDeliveryCfg settings.Snapshot
 	confirmAccount  im.Account
 	confirmSession  string
+	debugText       string
+	debugReceipt    im.DeliveryReceipt
 	resetCalls      int
 }
 
@@ -90,6 +92,29 @@ func (f *fakeIM) ConfirmWeChatLogin(sessionKey string) (im.Account, error) {
 		}
 	}
 	return f.confirmAccount, nil
+}
+
+func (f *fakeIM) SendTextToDefaultChannel(text string) (im.DeliveryReceipt, error) {
+	f.debugText = text
+	if f.debugReceipt.MessageID == "" {
+		f.debugReceipt = im.DeliveryReceipt{
+			Account: im.Account{
+				ID:              "account_1",
+				Platform:        im.PlatformWeChat,
+				RemoteAccountID: "bot@im.bot",
+				DisplayName:     "bot@im.bot",
+			},
+			Target: im.Target{
+				ID:           "target_1",
+				AccountID:    "account_1",
+				Name:         "我的微信",
+				TargetUserID: "user@im.wechat",
+			},
+			MessageID: "msg_1",
+			Text:      text,
+		}
+	}
+	return f.debugReceipt, nil
 }
 
 func (f *fakeIM) UpsertTarget(accountID string, name string, targetUserID string, setDefault bool) (im.Target, error) {
@@ -290,5 +315,40 @@ func TestHandleWeChatLoginConfirmPersistsAfterExplicitConfirmation(t *testing.T)
 	}
 	if payload.Account.RemoteAccountID != "bot@im.bot" {
 		t.Fatalf("RemoteAccountID = %q, want bot@im.bot", payload.Account.RemoteAccountID)
+	}
+}
+
+func TestHandleIMDebugSendDefaultUsesPostedText(t *testing.T) {
+	t.Parallel()
+
+	imGateway := &fakeIM{}
+	server := New(":0", nil, nil, nil, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, imGateway)
+	req := httptest.NewRequest(http.MethodPost, "/api/im/debug/send-default", strings.NewReader(`{"text":"调试消息"}`))
+	recorder := httptest.NewRecorder()
+
+	server.handleIMDebugSendDefault(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if imGateway.debugText != "调试消息" {
+		t.Fatalf("debugText = %q, want 调试消息", imGateway.debugText)
+	}
+
+	var payload struct {
+		OK      bool               `json:"ok"`
+		Receipt im.DeliveryReceipt `json:"receipt"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if !payload.OK {
+		t.Fatal("OK = false, want true")
+	}
+	if payload.Receipt.MessageID != "msg_1" {
+		t.Fatalf("MessageID = %q, want msg_1", payload.Receipt.MessageID)
+	}
+	if payload.Receipt.Text != "调试消息" {
+		t.Fatalf("Text = %q, want 调试消息", payload.Receipt.Text)
 	}
 }

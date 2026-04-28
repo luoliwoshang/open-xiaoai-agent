@@ -497,7 +497,8 @@ code {
   line-height: 1.6;
 }
 
-.settings-input {
+.settings-input,
+.settings-textarea {
   width: 100%;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 16px;
@@ -507,7 +508,13 @@ code {
   font: inherit;
 }
 
-.settings-input:focus {
+.settings-textarea {
+  resize: vertical;
+  min-height: 112px;
+}
+
+.settings-input:focus,
+.settings-textarea:focus {
   outline: none;
   border-color: rgba(42, 234, 196, 0.46);
   box-shadow: 0 0 0 4px rgba(42, 234, 196, 0.08);
