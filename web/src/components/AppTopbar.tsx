@@ -8,8 +8,8 @@ export function AppTopbar({ page }: Props) {
   return (
     <header className="topbar">
       <div>
-        <p className="eyebrow">OPEN XIAOAI AGENT</p>
-        <h1 className="topbar-title">灵矽控制台</h1>
+        <p className="eyebrow">XIAOAIAGENT</p>
+        <h1 className="topbar-title">XiaoAiAgent 控制台</h1>
       </div>
 
       <nav className="topbar-nav">
@@ -23,4 +23,3 @@ export function AppTopbar({ page }: Props) {
     </header>
   )
 }
-

@@ -195,7 +195,7 @@ export function DashboardPage({ data, loading, error, setData }: Props) {
 
           <div className="task-list">
             {data.tasks.length === 0 ? (
-              <div className="empty-card">当前还没有任务。先让灵矽接一个复杂任务试试看。</div>
+              <div className="empty-card">当前还没有任务。先让 XiaoAiAgent 接一个复杂任务试试看。</div>
             ) : (
               data.tasks.map((task) => (
                 <article
@@ -413,4 +413,3 @@ export function DashboardPage({ data, loading, error, setData }: Props) {
     </>
   )
 }
-

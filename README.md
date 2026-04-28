@@ -1,6 +1,6 @@
-# Open XiaoAI Agent
+# XiaoAiAgent
 
-`open-xiaoai-agent` 是面向 [`open-xiaoai`](https://github.com/idootop/open-xiaoai) 生态的独立服务端。
+`XiaoAiAgent` 是面向 [`open-xiaoai`](https://github.com/idootop/open-xiaoai) 生态的独立服务端，仓库名为 `open-xiaoai-agent`。
 
 它想做的事情很简单：把“小爱同学”从一个语音入口，增强成一个真正能对话、能接任务、能追进度、能回来继续做事的 AI 助理。
 
