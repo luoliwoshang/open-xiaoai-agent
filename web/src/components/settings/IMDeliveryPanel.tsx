@@ -31,6 +31,9 @@ export function IMDeliveryPanel({
   onTargetChange,
   onSave,
 }: Props) {
+  const hasAccounts = accounts.length > 0
+  const hasTargets = targets.length > 0
+
   return (
     <article className="panel settings-panel">
       <div className="panel-head compact">
@@ -54,38 +57,42 @@ export function IMDeliveryPanel({
           <span>激活微信账号</span>
           <select
             className="settings-select"
+            disabled={!hasAccounts}
             value={accountID}
             onChange={(event) => onAccountChange(event.target.value)}
           >
-            <option value="">请选择账号</option>
+            <option value="">{hasAccounts ? '请选择账号' : '请先配置带有触达目标的账号'}</option>
             {accounts.map((account) => (
               <option key={account.id} value={account.id}>
                 {account.display_name || account.remote_account_id}
               </option>
             ))}
           </select>
+          <span className="settings-note">这里只显示已经配置过触达目标的账号。</span>
         </label>
 
         <label className="settings-field">
           <span>默认触达对象</span>
           <select
             className="settings-select"
+            disabled={!accountID || !hasTargets}
             value={targetID}
             onChange={(event) => onTargetChange(event.target.value)}
           >
-            <option value="">请选择目标</option>
+            <option value="">{accountID ? (hasTargets ? '请选择目标' : '当前账号还没有已配置目标') : '请先选择账号'}</option>
             {targets.map((target) => (
               <option key={target.id} value={target.id}>
                 {target.name} · {target.target_user_id}
               </option>
             ))}
           </select>
+          <span className="settings-note">镜像投递只能选择已经在下方“触达目标管理”里配置好的对象。</span>
         </label>
 
         <div className="settings-actions">
           <button
             className="settings-button"
-            disabled={saving || !dirty}
+            disabled={saving || !dirty || (enabled && (!accountID || !targetID))}
             onClick={() => onSave()}
             type="button"
           >
@@ -100,4 +107,3 @@ export function IMDeliveryPanel({
     </article>
   )
 }
-

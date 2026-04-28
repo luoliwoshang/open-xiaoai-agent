@@ -57,8 +57,15 @@ type WeChatLoginStart struct {
 	ExpiresAt     time.Time `json:"expires_at"`
 }
 
+type WeChatLoginCandidate struct {
+	RemoteAccountID string `json:"remote_account_id"`
+	OwnerUserID     string `json:"owner_user_id"`
+	DisplayName     string `json:"display_name"`
+	BaseURL         string `json:"base_url"`
+}
+
 type WeChatLoginStatus struct {
-	Status  string   `json:"status"`
-	Message string   `json:"message"`
-	Account *Account `json:"account,omitempty"`
+	Status    string                `json:"status"`
+	Message   string                `json:"message"`
+	Candidate *WeChatLoginCandidate `json:"candidate,omitempty"`
 }

@@ -60,6 +60,8 @@ func (f *fakeSettings) UpdateIMDelivery(enabled bool, accountID string, targetID
 type fakeIM struct {
 	snapshot        im.Snapshot
 	lastDeliveryCfg settings.Snapshot
+	confirmAccount  im.Account
+	confirmSession  string
 	resetCalls      int
 }
 
@@ -73,6 +75,21 @@ func (f *fakeIM) StartWeChatLogin() (im.WeChatLoginStart, error) {
 
 func (f *fakeIM) PollWeChatLogin(sessionKey string) (im.WeChatLoginStatus, error) {
 	return im.WeChatLoginStatus{Status: "pending", Message: sessionKey}, nil
+}
+
+func (f *fakeIM) ConfirmWeChatLogin(sessionKey string) (im.Account, error) {
+	f.confirmSession = sessionKey
+	if f.confirmAccount.ID == "" {
+		f.confirmAccount = im.Account{
+			ID:              "account_1",
+			Platform:        im.PlatformWeChat,
+			RemoteAccountID: "bot@im.bot",
+			OwnerUserID:     "user@im.wechat",
+			DisplayName:     "bot@im.bot",
+			BaseURL:         "https://example.com",
+		}
+	}
+	return f.confirmAccount, nil
 }
 
 func (f *fakeIM) UpsertTarget(accountID string, name string, targetUserID string, setDefault bool) (im.Target, error) {
@@ -241,5 +258,37 @@ func TestHandleSessionSettingsRejectsInvalidValue(t *testing.T) {
 
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleWeChatLoginConfirmPersistsAfterExplicitConfirmation(t *testing.T) {
+	t.Parallel()
+
+	imGateway := &fakeIM{}
+	server := New(":0", nil, nil, nil, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, imGateway)
+	req := httptest.NewRequest(http.MethodPost, "/api/im/wechat/login/confirm", strings.NewReader(`{"session_key":"sess-1"}`))
+	recorder := httptest.NewRecorder()
+
+	server.handleWeChatLoginConfirm(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if imGateway.confirmSession != "sess-1" {
+		t.Fatalf("confirmSession = %q, want sess-1", imGateway.confirmSession)
+	}
+
+	var payload struct {
+		OK      bool       `json:"ok"`
+		Account im.Account `json:"account"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if !payload.OK {
+		t.Fatal("OK = false, want true")
+	}
+	if payload.Account.RemoteAccountID != "bot@im.bot" {
+		t.Fatalf("RemoteAccountID = %q, want bot@im.bot", payload.Account.RemoteAccountID)
 	}
 }

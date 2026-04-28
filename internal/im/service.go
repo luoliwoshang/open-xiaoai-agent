@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/settings"
@@ -20,13 +21,20 @@ type Service struct {
 	settings runtimeSettings
 	adapters map[string]Adapter
 
-	deliveries chan deliveryRequest
+	pendingMu     sync.Mutex
+	pendingLogins map[string]pendingWeChatLogin
+	deliveries    chan deliveryRequest
 }
 
 type deliveryRequest struct {
 	AccountID string
 	TargetID  string
 	Text      string
+}
+
+type pendingWeChatLogin struct {
+	Result      WeChatLoginResult
+	ConfirmedAt time.Time
 }
 
 func NewService(dsn string, runtimeSettings runtimeSettings) (*Service, error) {
@@ -41,7 +49,8 @@ func NewService(dsn string, runtimeSettings runtimeSettings) (*Service, error) {
 		adapters: map[string]Adapter{
 			PlatformWeChat: NewWeChatAdapter(),
 		},
-		deliveries: make(chan deliveryRequest, 32),
+		pendingLogins: make(map[string]pendingWeChatLogin),
+		deliveries:    make(chan deliveryRequest, 32),
 	}
 	go svc.runDeliveryLoop()
 	return svc, nil
@@ -70,6 +79,18 @@ func (s *Service) StartWeChatLogin() (WeChatLoginStart, error) {
 }
 
 func (s *Service) PollWeChatLogin(sessionKey string) (WeChatLoginStatus, error) {
+	sessionKey = strings.TrimSpace(sessionKey)
+	if sessionKey == "" {
+		return WeChatLoginStatus{}, fmt.Errorf("wechat login session key is required")
+	}
+	if pending, ok := s.getPendingWeChatLogin(sessionKey); ok {
+		return WeChatLoginStatus{
+			Status:    pending.Status,
+			Message:   pending.Message,
+			Candidate: buildWeChatLoginCandidate(pending),
+		}, nil
+	}
+
 	adapter, ok := s.adapters[PlatformWeChat]
 	if !ok {
 		return WeChatLoginStatus{}, fmt.Errorf("wechat adapter is not configured")
@@ -91,6 +112,26 @@ func (s *Service) PollWeChatLogin(sessionKey string) (WeChatLoginStatus, error) 
 		return status, nil
 	}
 
+	s.rememberPendingWeChatLogin(sessionKey, result)
+	status.Candidate = buildWeChatLoginCandidate(result)
+	return status, nil
+}
+
+func (s *Service) ConfirmWeChatLogin(sessionKey string) (Account, error) {
+	if s == nil || s.store == nil {
+		return Account{}, fmt.Errorf("im service is not configured")
+	}
+
+	sessionKey = strings.TrimSpace(sessionKey)
+	if sessionKey == "" {
+		return Account{}, fmt.Errorf("wechat login session key is required")
+	}
+
+	result, ok := s.getPendingWeChatLogin(sessionKey)
+	if !ok {
+		return Account{}, fmt.Errorf("当前扫码结果不存在或已失效，请重新发起登录")
+	}
+
 	account, err := s.store.UpsertAccount(
 		PlatformWeChat,
 		result.RemoteAccountID,
@@ -100,17 +141,17 @@ func (s *Service) PollWeChatLogin(sessionKey string) (WeChatLoginStatus, error) 
 		result.Token,
 	)
 	if err != nil {
-		return WeChatLoginStatus{}, err
+		return Account{}, err
 	}
 	if _, err := s.store.EnsureOwnerTarget(account.ID, result.OwnerUserID); err != nil {
-		return WeChatLoginStatus{}, err
+		return Account{}, err
 	}
 	if err := s.store.AppendEvent(account.ID, "login", "微信账号登录成功"); err != nil {
 		log.Printf("append im login event failed: %v", err)
 	}
 
-	status.Account = &account
-	return status, nil
+	s.deletePendingWeChatLogin(sessionKey)
+	return account, nil
 }
 
 func (s *Service) UpsertTarget(accountID string, name string, targetUserID string, setDefault bool) (Target, error) {
@@ -231,6 +272,9 @@ func (s *Service) Reset() error {
 			return err
 		}
 	}
+	s.pendingMu.Lock()
+	s.pendingLogins = make(map[string]pendingWeChatLogin)
+	s.pendingMu.Unlock()
 	return nil
 }
 
@@ -336,4 +380,60 @@ func trimForEvent(text string) string {
 	}
 	runes := []rune(text)
 	return string(runes[:limit]) + "..."
+}
+
+func (s *Service) getPendingWeChatLogin(sessionKey string) (WeChatLoginResult, bool) {
+	if s == nil {
+		return WeChatLoginResult{}, false
+	}
+
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+
+	pending, ok := s.pendingLogins[sessionKey]
+	if !ok {
+		return WeChatLoginResult{}, false
+	}
+	if time.Since(pending.ConfirmedAt) > 30*time.Minute {
+		delete(s.pendingLogins, sessionKey)
+		return WeChatLoginResult{}, false
+	}
+	return pending.Result, true
+}
+
+func (s *Service) rememberPendingWeChatLogin(sessionKey string, result WeChatLoginResult) {
+	if s == nil {
+		return
+	}
+
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+
+	s.pendingLogins[sessionKey] = pendingWeChatLogin{
+		Result:      result,
+		ConfirmedAt: time.Now(),
+	}
+}
+
+func (s *Service) deletePendingWeChatLogin(sessionKey string) {
+	if s == nil {
+		return
+	}
+
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+
+	delete(s.pendingLogins, sessionKey)
+}
+
+func buildWeChatLoginCandidate(result WeChatLoginResult) *WeChatLoginCandidate {
+	if strings.TrimSpace(result.RemoteAccountID) == "" {
+		return nil
+	}
+	return &WeChatLoginCandidate{
+		RemoteAccountID: strings.TrimSpace(result.RemoteAccountID),
+		OwnerUserID:     strings.TrimSpace(result.OwnerUserID),
+		DisplayName:     strings.TrimSpace(result.RemoteAccountID),
+		BaseURL:         strings.TrimSpace(result.BaseURL),
+	}
 }

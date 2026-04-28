@@ -691,10 +691,102 @@ code {
   gap: 14px;
 }
 
+.settings-workspace {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.settings-nav-card,
+.settings-stage-card {
+  min-height: auto;
+}
+
+.settings-nav-card {
+  position: sticky;
+  top: 24px;
+}
+
+.settings-nav-list {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-nav-item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 22px;
+  padding: 18px;
+  color: rgba(237, 242, 255, 0.84);
+  background: linear-gradient(160deg, rgba(18, 31, 54, 0.88), rgba(11, 17, 31, 0.74));
+  font: inherit;
+  cursor: pointer;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.settings-nav-item:hover {
+  transform: translateY(-1px);
+  border-color: rgba(42, 234, 196, 0.24);
+}
+
+.settings-nav-item span {
+  display: block;
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 0.72rem;
+  color: rgba(237, 242, 255, 0.46);
+}
+
+.settings-nav-item strong {
+  display: block;
+  font-size: 1.08rem;
+  letter-spacing: -0.02em;
+}
+
+.settings-nav-item p {
+  margin: 8px 0 0;
+  color: rgba(237, 242, 255, 0.68);
+  line-height: 1.6;
+}
+
+.settings-nav-item-active {
+  border-color: rgba(42, 234, 196, 0.32);
+  background:
+    linear-gradient(160deg, rgba(16, 47, 51, 0.92), rgba(11, 17, 31, 0.82)),
+    linear-gradient(135deg, rgba(42, 234, 196, 0.18), rgba(255, 192, 98, 0.12));
+  box-shadow: inset 0 1px 0 rgba(92, 251, 236, 0.22), 0 18px 60px rgba(0, 0, 0, 0.32);
+}
+
+.settings-nav-item-active span {
+  color: rgba(184, 255, 224, 0.78);
+}
+
+.settings-stage {
+  display: grid;
+  gap: 18px;
+}
+
+.settings-stage-copy {
+  margin: 0;
+  color: rgba(237, 242, 255, 0.72);
+  line-height: 1.7;
+}
+
 .settings-grid-page {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
+}
+
+.settings-grid-single {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .settings-panel {
@@ -705,9 +797,38 @@ code {
   grid-column: 1 / -1;
 }
 
+.settings-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(2, 6, 15, 0.72);
+  backdrop-filter: blur(16px);
+}
+
+.settings-modal-card {
+  width: min(860px, 100%);
+  max-height: min(92vh, 920px);
+  overflow: auto;
+  padding: 24px;
+  border-radius: 28px;
+  backdrop-filter: blur(18px);
+  background: rgba(8, 13, 24, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.4);
+}
+
 .settings-login-grid {
   display: grid;
   grid-template-columns: minmax(240px, 280px) minmax(0, 1fr);
+  gap: 18px;
+}
+
+.settings-login-confirm {
+  display: grid;
   gap: 18px;
 }
 
@@ -811,11 +932,16 @@ code {
 @media (max-width: 1100px) {
   .hero,
   .content-grid,
+  .settings-workspace,
   .settings-grid-page,
   .settings-hero-card,
   .target-editor,
   .settings-login-grid {
     grid-template-columns: 1fr;
+  }
+
+  .settings-nav-card {
+    position: static;
   }
 
   .metrics-grid {
