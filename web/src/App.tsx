@@ -11,28 +11,30 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <div className="aurora aurora-left" />
-      <div className="aurora aurora-right" />
+      <div className="app-glow app-glow-left" />
+      <div className="app-glow app-glow-right" />
 
-      <AppTopbar page={page} />
+      <AppTopbar data={data} page={page} />
 
-      {page === 'dashboard' ? (
-        <DashboardPage
-          data={data}
-          error={error}
-          loading={loading}
-          setData={setData}
-        />
-      ) : page === 'logs' ? (
-        <LogsPage />
-      ) : (
-        <SettingsPage
-          data={data}
-          error={error}
-          refresh={refresh}
-          setData={setData}
-        />
-      )}
+      <div className="app-main">
+        {page === 'dashboard' ? (
+          <DashboardPage
+            data={data}
+            error={error}
+            loading={loading}
+            setData={setData}
+          />
+        ) : page === 'logs' ? (
+          <LogsPage />
+        ) : (
+          <SettingsPage
+            data={data}
+            error={error}
+            refresh={refresh}
+            setData={setData}
+          />
+        )}
+      </div>
     </div>
   )
 }

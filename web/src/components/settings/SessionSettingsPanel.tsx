@@ -50,7 +50,7 @@ export function SessionSettingsPanel({
           >
             {settingsSaving ? '保存中...' : '保存设置'}
           </button>
-          <span className="settings-note">默认值 300 秒，只保留滑动窗口策略。</span>
+          <span className="settings-note">默认是 300 秒，越长越像延续聊天，越短越像重新开场。</span>
         </div>
 
         {settingsFeedback ? <div className="settings-feedback">{settingsFeedback}</div> : null}
@@ -59,4 +59,3 @@ export function SessionSettingsPanel({
     </article>
   )
 }
-

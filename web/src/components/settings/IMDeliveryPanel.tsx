@@ -39,7 +39,7 @@ export function IMDeliveryPanel({
       <div className="panel-head compact">
         <div>
           <p className="eyebrow">IM DELIVERY</p>
-          <h3>回复镜像到微信</h3>
+          <h3>默认触达</h3>
         </div>
       </div>
 
@@ -50,7 +50,7 @@ export function IMDeliveryPanel({
             onChange={(event) => onEnabledChange(event.target.checked)}
             type="checkbox"
           />
-          <span>开启后，小爱的正常回复会异步再发一份到微信。</span>
+          <span>开启后，小爱的正常回复会悄悄再发一份到默认微信对象。</span>
         </label>
 
         <label className="settings-field">
@@ -86,7 +86,7 @@ export function IMDeliveryPanel({
               </option>
             ))}
           </select>
-          <span className="settings-note">镜像投递只能选择已经在下方“触达目标管理”里配置好的对象。</span>
+          <span className="settings-note">这里只能从已经配置好的对象里选，避免把消息发到未知目标。</span>
         </label>
 
         <div className="settings-actions">
@@ -98,7 +98,7 @@ export function IMDeliveryPanel({
           >
             {saving ? '保存中...' : '保存镜像设置'}
           </button>
-          <span className="settings-note">发送为异步副作用，不阻塞小爱当前播报。</span>
+          <span className="settings-note">这条转发不会打断小爱当前的播报节奏。</span>
         </div>
 
         {feedback ? <div className="settings-feedback">{feedback}</div> : null}

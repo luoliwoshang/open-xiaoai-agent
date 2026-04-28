@@ -1,3 +1,4 @@
+import { BellRing, MessageSquareHeart, Settings2, SmartphoneCharging } from 'lucide-react'
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
 import { IMDebugSendPanel } from '../components/settings/IMDebugSendPanel'
 import { IMDeliveryPanel } from '../components/settings/IMDeliveryPanel'
@@ -5,6 +6,9 @@ import { IMTargetsPanel } from '../components/settings/IMTargetsPanel'
 import { SessionSettingsPanel } from '../components/settings/SessionSettingsPanel'
 import { WeChatAccountsPanel } from '../components/settings/WeChatAccountsPanel'
 import { WeChatLoginPanel } from '../components/settings/WeChatLoginPanel'
+import { EmptyState } from '../components/ui/EmptyState'
+import { PillTabs } from '../components/ui/PillTabs'
+import { SectionCard } from '../components/ui/SectionCard'
 import { postFormData, postJSON } from '../lib/api'
 import { normalizeSettings, selectBestTarget } from '../lib/dashboard'
 import type {
@@ -18,12 +22,14 @@ import type {
 } from '../types'
 
 type SettingsSectionKey = 'system' | 'im'
+type IMViewKey = 'delivery' | 'debug' | 'accounts' | 'targets'
 
 type SettingsSection = {
   key: SettingsSectionKey
   eyebrow: string
   title: string
   description: string
+  Icon: typeof Settings2
 }
 
 type LoginPanelState = {
@@ -59,16 +65,25 @@ const emptyLoginState: LoginPanelState = {
 const settingsSections: SettingsSection[] = [
   {
     key: 'system',
-    eyebrow: 'SYSTEM',
+    eyebrow: 'SYSTEM CARE',
     title: '系统设置',
-    description: '管理会话窗口和全局运行期行为，适合放置 Agent 的基础配置。',
+    description: '把会话节奏和全局行为调成更适合你的日常陪伴方式。',
+    Icon: Settings2,
   },
   {
     key: 'im',
     eyebrow: 'IM GATEWAY',
-    title: 'IM 配置',
-    description: '单独管理微信登录、账号、触达目标和回复镜像，不再与系统设置混排。',
+    title: '触达配置',
+    description: '管理微信账号、默认触达、调试发送，以及后续要发到哪里。',
+    Icon: SmartphoneCharging,
   },
+]
+
+const imViews: Array<{ key: IMViewKey; label: string; caption: string }> = [
+  { key: 'delivery', label: '镜像规则', caption: '自动回复怎么转发' },
+  { key: 'debug', label: '手动调试', caption: '文本 / 图片 / 文件' },
+  { key: 'accounts', label: '微信账号', caption: '扫码与账号管理' },
+  { key: 'targets', label: '触达对象', caption: '谁会收到消息' },
 ]
 
 type Props = {
@@ -80,6 +95,7 @@ type Props = {
 
 export function SettingsPage({ data, error, setData, refresh }: Props) {
   const [activeSection, setActiveSection] = useState<SettingsSectionKey>('system')
+  const [activeIMView, setActiveIMView] = useState<IMViewKey>('delivery')
   const [windowInput, setWindowInput] = useState('300')
   const [windowDirty, setWindowDirty] = useState(false)
   const [settingsSaving, setSettingsSaving] = useState(false)
@@ -240,7 +256,7 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
       }))
       setWindowInput(String(nextSettings.session_window_seconds))
       setWindowDirty(false)
-      setSettingsFeedback('已保存，后续请求会立即按新的滑动窗口秒数生效。')
+      setSettingsFeedback('新的会话窗口已经生效。')
     } catch (err) {
       setSettingsError(err instanceof Error ? err.message : '保存失败')
     } finally {
@@ -250,7 +266,7 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
 
   async function saveDeliverySettings() {
     if (deliveryEnabled && (!deliveryAccountID || !deliveryTargetID)) {
-      setDeliveryError('开启镜像前，请先选择一个已经配置好的账号和触达目标。')
+      setDeliveryError('先选好一个账号和一个触达对象，再打开自动镜像。')
       setDeliveryFeedback(null)
       return
     }
@@ -271,7 +287,7 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
         settings: nextSettings,
       }))
       setDeliveryDirty(false)
-      setDeliveryFeedback('IM 文本触达设置已保存。')
+      setDeliveryFeedback('默认触达规则已经保存。')
     } catch (err) {
       setDeliveryError(err instanceof Error ? err.message : '保存失败')
     } finally {
@@ -301,7 +317,7 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
         qrRawText: payload.login.qr_raw_text,
         expiresAt: payload.login.expires_at,
         status: 'pending',
-        message: '请使用微信扫描下方二维码。',
+        message: '请用微信扫描这张二维码。',
         error: null,
         candidate: null,
       })
@@ -338,7 +354,7 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
       })
       await refresh()
       setLoginPanel(emptyLoginState)
-      setDeliveryFeedback('微信账号已添加，你现在可以继续配置触达目标和镜像规则。')
+      setDeliveryFeedback('微信账号已经加入，可以继续配置默认触达。')
       setDeliveryError(null)
     } catch (err) {
       setLoginPanel((current) => ({
@@ -364,7 +380,7 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
       setTargetName('')
       setTargetUserID('')
       setTargetDefault(true)
-      setTargetFeedback('触达目标已保存。')
+      setTargetFeedback('触达对象已经保存。')
       if (!deliveryAccountID) {
         setDeliveryAccountID(targetAccountID)
       }
@@ -382,7 +398,7 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
         target_id: targetID,
       })
       await refresh()
-      setTargetFeedback('默认触达目标已更新。')
+      setTargetFeedback('默认触达对象已经更新。')
       setTargetError(null)
     } catch (err) {
       setTargetError(err instanceof Error ? err.message : '更新默认目标失败')
@@ -390,13 +406,13 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
   }
 
   async function deleteTarget(targetID: string) {
-    if (!window.confirm('确定删除这个触达目标吗？')) return
+    if (!window.confirm('确定删除这个触达对象吗？')) return
     try {
       await postJSON('/api/im/targets/delete', {
         target_id: targetID,
       })
       await refresh()
-      setTargetFeedback('触达目标已删除。')
+      setTargetFeedback('触达对象已删除。')
       setTargetError(null)
     } catch (err) {
       setTargetError(err instanceof Error ? err.message : '删除触达目标失败')
@@ -404,7 +420,7 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
   }
 
   async function deleteAccount(accountID: string) {
-    if (!window.confirm('确定删除这个微信账号吗？这会同时删除它下面的触达目标。')) return
+    if (!window.confirm('确定删除这个微信账号吗？这会同时删除它下面的触达对象。')) return
     try {
       await postJSON('/api/im/accounts/delete', {
         account_id: accountID,
@@ -434,7 +450,7 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
       await refresh()
       setDebugText('')
       if (payload.receipt) {
-        setDebugTextFeedback(`测试消息已发送到 ${payload.receipt.account.display_name || payload.receipt.account.remote_account_id} / ${payload.receipt.target.name}。`)
+        setDebugTextFeedback(`测试消息已发到 ${payload.receipt.target.name}。`)
       } else {
         setDebugTextFeedback('测试消息发送成功。')
       }
@@ -467,7 +483,7 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
       setDebugImageInputKey((current) => current + 1)
       if (result.receipt) {
         const label = result.receipt.media_file_name || debugImageFile.name
-        setDebugImageFeedback(`测试图片 ${label} 已发送到 ${result.receipt.account.display_name || result.receipt.account.remote_account_id} / ${result.receipt.target.name}。`)
+        setDebugImageFeedback(`测试图片 ${label} 已经发出。`)
       } else {
         setDebugImageFeedback('测试图片发送成功。')
       }
@@ -500,7 +516,7 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
       setDebugFileInputKey((current) => current + 1)
       if (result.receipt) {
         const label = result.receipt.media_file_name || debugFileFile.name
-        setDebugFileFeedback(`测试文件 ${label} 已发送到 ${result.receipt.account.display_name || result.receipt.account.remote_account_id} / ${result.receipt.target.name}。`)
+        setDebugFileFeedback(`测试文件 ${label} 已经发出。`)
       } else {
         setDebugFileFeedback('测试文件发送成功。')
       }
@@ -512,72 +528,76 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
   }
 
   return (
-    <main className="settings-page">
-      <section className="settings-hero-card">
-        <div>
-          <p className="eyebrow">SETTINGS CENTER</p>
-          <h2>把设置拆成清晰的配置域</h2>
-          <p className="hero-text">
-            设置页不再把所有配置堆成一个长滚动页面，而是按配置域分开管理。
-            左侧菜单负责切换，右侧只展示当前配置域的内容，让系统设置和 IM 配置各自独立。
-          </p>
+    <main className="page-shell settings-shell">
+      <header className="page-hero">
+        <div className="page-hero-copy">
+          <p className="section-eyebrow">CARE & DELIVERY</p>
+          <h2>把小爱的设置收成舒服、安静、不会乱跑的几个区域</h2>
+          <p>设置页会固定住整体结构。左边选配置域，右边只做当前这件事，不再把所有表单铺成一条长走廊。</p>
         </div>
-        <div className="settings-hero-stats">
-          <div className="metric-card metric-mint">
-            <span>配置域</span>
+
+        <div className="hero-metrics">
+          <article className="hero-metric hero-metric-peach">
+            <span><Settings2 size={16} /> 配置域</span>
             <strong>{settingsSections.length}</strong>
-          </div>
-          <div className="metric-card metric-cyan">
-            <span>微信账号</span>
-            <strong>{data.im.accounts.length}</strong>
-          </div>
-          <div className="metric-card metric-amber">
-            <span>镜像状态</span>
+            <small>系统与触达分开</small>
+          </article>
+          <article className="hero-metric hero-metric-mint">
+            <span><BellRing size={16} /> 自动镜像</span>
             <strong>{data.settings.im_delivery_enabled ? '已开启' : '未开启'}</strong>
-          </div>
+            <small>只影响默认触达</small>
+          </article>
+          <article className="hero-metric hero-metric-sky">
+            <span><MessageSquareHeart size={16} /> 微信账号</span>
+            <strong>{data.im.accounts.length}</strong>
+            <small>已经接入的账号数</small>
+          </article>
         </div>
-      </section>
+      </header>
 
-      {error ? <div className="error-banner">接口异常：{error}</div> : null}
+      {error ? <div className="banner-error">接口暂时有点卡住了：{error}</div> : null}
 
-      <section className="settings-workspace">
-        <aside className="panel settings-nav-card">
-          <div className="panel-head compact">
-            <div>
-              <p className="eyebrow">SETTINGS MAP</p>
-              <h3>配置导航</h3>
+      <section className="settings-layout">
+        <aside className="settings-sidebar">
+          <SectionCard
+            className="settings-menu-card"
+            description="选一个区域，再在右边专心把这件事做好。"
+            eyebrow="SETTINGS MAP"
+            title="配置导航"
+          >
+            <div className="settings-menu-list">
+              {settingsSections.map((section) => {
+                const active = section.key === activeSection
+                const Icon = section.Icon
+                return (
+                  <button
+                    key={section.key}
+                    className={`settings-menu-item ${active ? 'settings-menu-item-active' : ''}`}
+                    onClick={() => setActiveSection(section.key)}
+                    type="button"
+                  >
+                    <span className="settings-menu-item-icon"><Icon size={18} /></span>
+                    <span className="settings-menu-item-copy">
+                      <strong>{section.title}</strong>
+                      <small>{section.description}</small>
+                    </span>
+                  </button>
+                )
+              })}
             </div>
-          </div>
-
-          <div className="settings-nav-list">
-            {settingsSections.map((section) => (
-              <button
-                key={section.key}
-                className={`settings-nav-item ${section.key === activeSection ? 'settings-nav-item-active' : ''}`}
-                onClick={() => setActiveSection(section.key)}
-                type="button"
-              >
-                <span>{section.eyebrow}</span>
-                <strong>{section.title}</strong>
-                <p>{section.description}</p>
-              </button>
-            ))}
-          </div>
+          </SectionCard>
         </aside>
 
         <div className="settings-stage">
-          <section className="panel settings-stage-card">
-            <div className="panel-head compact">
-              <div>
-                <p className="eyebrow">{currentSection.eyebrow}</p>
-                <h3>{currentSection.title}</h3>
-              </div>
-            </div>
-            <p className="settings-stage-copy">{currentSection.description}</p>
-          </section>
+          <SectionCard
+            className="settings-stage-card"
+            description={currentSection.description}
+            eyebrow={currentSection.eyebrow}
+            title={currentSection.title}
+          />
 
           {activeSection === 'system' ? (
-            <section className="settings-grid-page settings-grid-single">
+            <div className="settings-content-single">
               <SessionSettingsPanel
                 settingsError={settingsError}
                 settingsFeedback={settingsFeedback}
@@ -592,121 +612,153 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
                   setSettingsError(null)
                 }}
               />
-            </section>
+
+              <SectionCard
+                className="helper-card"
+                description="会话窗口越长，小爱越容易延续刚刚那段对话；越短，越像重新开始一轮新聊天。"
+                eyebrow="GENTLE TIP"
+                title="怎么理解这个设置"
+              >
+                <div className="helper-points">
+                  <p>日常陪伴型使用可以保留默认值 300 秒。</p>
+                  <p>如果你希望切话题更干脆，可以调短一些。</p>
+                  <p>这里现在只保留滑动窗口策略，不再暴露多余开关。</p>
+                </div>
+              </SectionCard>
+            </div>
           ) : (
-            <section className="settings-grid-page">
-              <IMDeliveryPanel
-                accountID={deliveryAccountID}
-                accounts={deliveryAccounts}
-                dirty={deliveryDirty}
-                enabled={deliveryEnabled}
-                error={deliveryError}
-                feedback={deliveryFeedback}
-                saving={deliverySaving}
-                targetID={deliveryTargetID}
-                targets={deliveryTargets}
-                onAccountChange={(value) => {
-                  setDeliveryAccountID(value)
-                  setDeliveryTargetID(selectBestTarget(data.im.targets, value))
-                  setDeliveryDirty(true)
-                  setDeliveryFeedback(null)
-                  setDeliveryError(null)
-                }}
-                onEnabledChange={(value) => {
-                  setDeliveryEnabled(value)
-                  setDeliveryDirty(true)
-                  setDeliveryFeedback(null)
-                  setDeliveryError(null)
-                }}
-                onSave={() => void saveDeliverySettings()}
-                onTargetChange={(value) => {
-                  setDeliveryTargetID(value)
-                  setDeliveryDirty(true)
-                  setDeliveryFeedback(null)
-                  setDeliveryError(null)
-                }}
-              />
+            <div className="settings-content-stack">
+              <PillTabs tabs={imViews} value={activeIMView} onChange={setActiveIMView} />
 
-              <IMDebugSendPanel
-                account={savedDebugAccount}
-                configDirty={deliveryDirty}
-                imageCaption={debugImageCaption}
-                imageError={debugImageError}
-                imageFeedback={debugImageFeedback}
-                imageFileName={debugImageFile?.name ?? null}
-                imageInputKey={debugImageInputKey}
-                imageSending={debugImageSending}
-                fileCaption={debugFileCaption}
-                fileError={debugFileError}
-                fileFeedback={debugFileFeedback}
-                fileFileName={debugFileFile?.name ?? null}
-                fileInputKey={debugFileInputKey}
-                fileSending={debugFileSending}
-                target={savedDebugTarget}
-                text={debugText}
-                textError={debugTextError}
-                textFeedback={debugTextFeedback}
-                textSending={debugTextSending}
-                onFileCaptionChange={(value) => {
-                  setDebugFileCaption(value)
-                  setDebugFileFeedback(null)
-                  setDebugFileError(null)
-                }}
-                onFileFileChange={(file) => {
-                  setDebugFileFile(file)
-                  setDebugFileFeedback(null)
-                  setDebugFileError(null)
-                }}
-                onSendFile={() => void sendDebugFile()}
-                onImageCaptionChange={(value) => {
-                  setDebugImageCaption(value)
-                  setDebugImageFeedback(null)
-                  setDebugImageError(null)
-                }}
-                onImageFileChange={(file) => {
-                  setDebugImageFile(file)
-                  setDebugImageFeedback(null)
-                  setDebugImageError(null)
-                }}
-                onSendImage={() => void sendDebugImage()}
-                onSendText={() => void sendDebugText()}
-                onTextChange={(value) => {
-                  setDebugText(value)
-                  setDebugTextFeedback(null)
-                  setDebugTextError(null)
-                }}
-              />
+              {activeIMView === 'delivery' ? (
+                <IMDeliveryPanel
+                  accountID={deliveryAccountID}
+                  accounts={deliveryAccounts}
+                  dirty={deliveryDirty}
+                  enabled={deliveryEnabled}
+                  error={deliveryError}
+                  feedback={deliveryFeedback}
+                  saving={deliverySaving}
+                  targetID={deliveryTargetID}
+                  targets={deliveryTargets}
+                  onAccountChange={(value) => {
+                    setDeliveryAccountID(value)
+                    setDeliveryTargetID(selectBestTarget(data.im.targets, value))
+                    setDeliveryDirty(true)
+                    setDeliveryFeedback(null)
+                    setDeliveryError(null)
+                  }}
+                  onEnabledChange={(value) => {
+                    setDeliveryEnabled(value)
+                    setDeliveryDirty(true)
+                    setDeliveryFeedback(null)
+                    setDeliveryError(null)
+                  }}
+                  onSave={() => void saveDeliverySettings()}
+                  onTargetChange={(value) => {
+                    setDeliveryTargetID(value)
+                    setDeliveryDirty(true)
+                    setDeliveryFeedback(null)
+                    setDeliveryError(null)
+                  }}
+                />
+              ) : null}
 
-              <WeChatAccountsPanel
-                accounts={data.im.accounts}
-                loginBusy={loginPanel.open}
-                onDeleteAccount={(accountID) => void deleteAccount(accountID)}
-                onStartLogin={() => void startWeChatLogin()}
-              />
+              {activeIMView === 'debug' ? (
+                <IMDebugSendPanel
+                  account={savedDebugAccount}
+                  configDirty={deliveryDirty}
+                  imageCaption={debugImageCaption}
+                  imageError={debugImageError}
+                  imageFeedback={debugImageFeedback}
+                  imageFileName={debugImageFile?.name ?? null}
+                  imageInputKey={debugImageInputKey}
+                  imageSending={debugImageSending}
+                  fileCaption={debugFileCaption}
+                  fileError={debugFileError}
+                  fileFeedback={debugFileFeedback}
+                  fileFileName={debugFileFile?.name ?? null}
+                  fileInputKey={debugFileInputKey}
+                  fileSending={debugFileSending}
+                  target={savedDebugTarget}
+                  text={debugText}
+                  textError={debugTextError}
+                  textFeedback={debugTextFeedback}
+                  textSending={debugTextSending}
+                  onFileCaptionChange={(value) => {
+                    setDebugFileCaption(value)
+                    setDebugFileFeedback(null)
+                    setDebugFileError(null)
+                  }}
+                  onFileFileChange={(file) => {
+                    setDebugFileFile(file)
+                    setDebugFileFeedback(null)
+                    setDebugFileError(null)
+                  }}
+                  onSendFile={() => void sendDebugFile()}
+                  onImageCaptionChange={(value) => {
+                    setDebugImageCaption(value)
+                    setDebugImageFeedback(null)
+                    setDebugImageError(null)
+                  }}
+                  onImageFileChange={(file) => {
+                    setDebugImageFile(file)
+                    setDebugImageFeedback(null)
+                    setDebugImageError(null)
+                  }}
+                  onSendImage={() => void sendDebugImage()}
+                  onSendText={() => void sendDebugText()}
+                  onTextChange={(value) => {
+                    setDebugText(value)
+                    setDebugTextFeedback(null)
+                    setDebugTextError(null)
+                  }}
+                />
+              ) : null}
 
-              <IMTargetsPanel
-                accountID={targetAccountID}
-                accountTargets={targetFormTargets}
-                accounts={data.im.accounts}
-                error={targetError}
-                feedback={targetFeedback}
-                name={targetName}
-                saving={targetSaving}
-                setDefault={targetDefault}
-                targetUserID={targetUserID}
-                onAccountChange={(value) => {
-                  setTargetAccountID(value)
-                  setTargetFeedback(null)
-                  setTargetError(null)
-                }}
-                onDeleteTarget={(targetID) => void deleteTarget(targetID)}
-                onNameChange={setTargetName}
-                onSave={() => void createTarget()}
-                onSetDefaultChange={setTargetDefault}
-                onSetDefaultTarget={(accountID, targetID) => void setDefaultTarget(accountID, targetID)}
-                onTargetUserIDChange={setTargetUserID}
-              />
-            </section>
+              {activeIMView === 'accounts' ? (
+                <WeChatAccountsPanel
+                  accounts={data.im.accounts}
+                  loginBusy={loginPanel.open}
+                  onDeleteAccount={(accountID) => void deleteAccount(accountID)}
+                  onStartLogin={() => void startWeChatLogin()}
+                />
+              ) : null}
+
+              {activeIMView === 'targets' ? (
+                data.im.accounts.length > 0 ? (
+                  <IMTargetsPanel
+                    accountID={targetAccountID}
+                    accountTargets={targetFormTargets}
+                    accounts={data.im.accounts}
+                    error={targetError}
+                    feedback={targetFeedback}
+                    name={targetName}
+                    saving={targetSaving}
+                    setDefault={targetDefault}
+                    targetUserID={targetUserID}
+                    onAccountChange={(value) => {
+                      setTargetAccountID(value)
+                      setTargetFeedback(null)
+                      setTargetError(null)
+                    }}
+                    onDeleteTarget={(targetID) => void deleteTarget(targetID)}
+                    onNameChange={setTargetName}
+                    onSave={() => void createTarget()}
+                    onSetDefaultChange={setTargetDefault}
+                    onSetDefaultTarget={(accountID, targetID) => void setDefaultTarget(accountID, targetID)}
+                    onTargetUserIDChange={setTargetUserID}
+                  />
+                ) : (
+                  <SectionCard className="helper-card" eyebrow="TARGETS" title="先加一个微信账号">
+                    <EmptyState
+                      title="还没有可配置的账号"
+                      description="先去“微信账号”里扫码接入一个账号，再回来管理默认触达对象。"
+                    />
+                  </SectionCard>
+                )
+              ) : null}
+            </div>
           )}
         </div>
       </section>

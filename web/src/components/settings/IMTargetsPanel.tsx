@@ -42,7 +42,7 @@ export function IMTargetsPanel({
       <div className="panel-head compact">
         <div>
           <p className="eyebrow">TARGETS</p>
-          <h3>触达目标管理</h3>
+          <h3>触达对象</h3>
         </div>
       </div>
 
@@ -100,7 +100,7 @@ export function IMTargetsPanel({
             >
               {saving ? '保存中...' : '保存目标'}
             </button>
-            <span className="settings-note">如果扫码返回了用户 ID，系统通常会自动补一个“扫码用户”目标。</span>
+            <span className="settings-note">如果扫码阶段拿到了用户 ID，系统通常会自动补一个“扫码用户”对象。</span>
           </div>
 
           {feedback ? <div className="settings-feedback">{feedback}</div> : null}
@@ -134,4 +134,3 @@ export function IMTargetsPanel({
     </article>
   )
 }
-
