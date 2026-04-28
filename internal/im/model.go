@@ -50,6 +50,13 @@ type DeliveryConfig struct {
 	SelectedTargetID  string `json:"selected_target_id"`
 }
 
+type DeliveryReceipt struct {
+	Account   Account `json:"account"`
+	Target    Target  `json:"target"`
+	MessageID string  `json:"message_id"`
+	Text      string  `json:"text"`
+}
+
 type WeChatLoginStart struct {
 	SessionKey    string    `json:"session_key"`
 	QRRawText     string    `json:"qr_raw_text"`

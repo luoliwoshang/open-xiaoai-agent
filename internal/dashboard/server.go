@@ -30,6 +30,7 @@ type Server struct {
 		StartWeChatLogin() (im.WeChatLoginStart, error)
 		PollWeChatLogin(sessionKey string) (im.WeChatLoginStatus, error)
 		ConfirmWeChatLogin(sessionKey string) (im.Account, error)
+		SendTextToDefaultChannel(text string) (im.DeliveryReceipt, error)
 		UpsertTarget(accountID string, name string, targetUserID string, setDefault bool) (im.Target, error)
 		SetDefaultTarget(accountID string, targetID string) error
 		DeleteTarget(targetID string) error
@@ -50,6 +51,7 @@ func New(addr string, tasks *tasks.Manager, claude *complextask.Service, convers
 	StartWeChatLogin() (im.WeChatLoginStart, error)
 	PollWeChatLogin(sessionKey string) (im.WeChatLoginStatus, error)
 	ConfirmWeChatLogin(sessionKey string) (im.Account, error)
+	SendTextToDefaultChannel(text string) (im.DeliveryReceipt, error)
 	UpsertTarget(accountID string, name string, targetUserID string, setDefault bool) (im.Target, error)
 	SetDefaultTarget(accountID string, targetID string) error
 	DeleteTarget(targetID string) error
@@ -77,6 +79,7 @@ func (s *Server) ListenAndServe() error {
 	mux.HandleFunc("/api/im/wechat/login/start", s.handleWeChatLoginStart)
 	mux.HandleFunc("/api/im/wechat/login/status", s.handleWeChatLoginStatus)
 	mux.HandleFunc("/api/im/wechat/login/confirm", s.handleWeChatLoginConfirm)
+	mux.HandleFunc("/api/im/debug/send-default", s.handleIMDebugSendDefault)
 	mux.HandleFunc("/api/im/targets", s.handleIMTargets)
 	mux.HandleFunc("/api/im/targets/default", s.handleIMTargetDefault)
 	mux.HandleFunc("/api/im/targets/delete", s.handleIMTargetDelete)
@@ -272,6 +275,36 @@ func (s *Server) handleWeChatLoginConfirm(w http.ResponseWriter, r *http.Request
 	writeJSON(w, map[string]any{
 		"ok":      true,
 		"account": account,
+	})
+}
+
+func (s *Server) handleIMDebugSendDefault(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.im == nil {
+		http.Error(w, "im gateway is not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	var payload struct {
+		Text string `json:"text"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, fmt.Sprintf("decode im debug send payload: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	receipt, err := s.im.SendTextToDefaultChannel(payload.Text)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"ok":      true,
+		"receipt": receipt,
 	})
 }
 
