@@ -163,31 +163,31 @@ export function LogsPage() {
 
       {error ? <div className="error-banner logs-error-banner">日志接口异常：{error}</div> : null}
 
-      <section className="logs-list">
+      <section className="panel logs-stream">
+        <div className="panel-head compact">
+          <div>
+            <p className="eyebrow">LOG STREAM</p>
+            <h3>紧凑日志流</h3>
+          </div>
+          <span className="panel-meta">按时间倒序展示，适合连续排查。</span>
+        </div>
+
         {data.items.length === 0 ? (
-          <article className="panel empty-card">当前还没有后端日志。</article>
+          <div className="empty-card">当前还没有后端日志。</div>
         ) : (
-          data.items.map((item) => (
-            <article className="panel log-card" key={item.id}>
-              <div className="log-card-head">
-                <div className="settings-actions">
+          <div className="logs-stream-list">
+            {data.items.map((item) => (
+              <article className="log-row" key={item.id}>
+                <div className="log-row-primary">
                   <span className={`badge badge-log badge-log-${item.level}`}>{levelLabels[item.level]}</span>
                   <span className="panel-meta">{formatTime(item.created_at)}</span>
+                  <code className="log-source">{item.source || 'unknown'}</code>
                 </div>
-                <code className="log-source">{item.source || 'unknown'}</code>
-              </div>
-
-              <div className="task-meta">
-                <span>消息正文</span>
-                <p className="log-message">{item.message || '—'}</p>
-              </div>
-
-              <div className="task-meta task-meta-wide">
-                <span>原始日志</span>
-                <pre className="log-raw">{item.raw}</pre>
-              </div>
-            </article>
-          ))
+                <p className="log-row-message">{item.message || '—'}</p>
+                <code className="log-row-raw">{item.raw}</code>
+              </article>
+            ))}
+          </div>
         )}
       </section>
     </main>
