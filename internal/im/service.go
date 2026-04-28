@@ -348,7 +348,7 @@ func (s *Service) MirrorText(text string) {
 	default:
 		log.Printf("im mirror queue is full, dropping message")
 		_ = s.store.MarkDeliveryFailure(request.AccountID, "IM 镜像发送队列繁忙，本次消息已丢弃")
-		_ = s.store.AppendEvent(request.AccountID, "send_drop", "IM 镜像发送队列繁忙，本次消息已丢弃")
+		s.appendEvent(request.AccountID, "send_drop", "IM 镜像发送队列繁忙，本次消息已丢弃")
 	}
 }
 
@@ -372,12 +372,12 @@ func (s *Service) deliverText(request deliveryRequest) (DeliveryReceipt, error) 
 	result, err := adapter.SendText(ctx, account, target, request.Text)
 	if err != nil {
 		_ = s.store.MarkDeliveryFailure(account.ID, err.Error())
-		_ = s.store.AppendEvent(account.ID, "send_failed", fmt.Sprintf("发送到 %s 失败：%s", target.Name, err.Error()))
+		s.appendEvent(account.ID, "send_failed", fmt.Sprintf("发送到 %s 失败：%s", target.Name, err.Error()))
 		return DeliveryReceipt{}, err
 	}
 
 	_ = s.store.MarkDeliverySuccess(account.ID)
-	_ = s.store.AppendEvent(account.ID, "send", fmt.Sprintf("已发送到 %s：%s", target.Name, trimForEvent(request.Text)))
+	s.appendEvent(account.ID, "send", fmt.Sprintf("已发送到 %s：%s", target.Name, trimForEvent(request.Text)))
 	return DeliveryReceipt{
 		Account:   account,
 		Target:    target,
@@ -393,13 +393,16 @@ func (s *Service) deliverImage(accountID string, targetID string, image Prepared
 		return DeliveryReceipt{}, err
 	}
 
+	log.Printf("im image delivery started: account=%s target=%s platform=%s file=%q mime=%s size=%d caption_len=%d", account.ID, target.ID, account.Platform, image.FileName, image.MimeType, image.Size, len(strings.TrimSpace(caption)))
+
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
 	result, err := adapter.SendImage(ctx, account, target, image, caption)
 	if err != nil {
 		_ = s.store.MarkDeliveryFailure(account.ID, err.Error())
-		_ = s.store.AppendEvent(account.ID, "send_failed", fmt.Sprintf("发送图片到 %s 失败：%s", target.Name, err.Error()))
+		s.appendEvent(account.ID, "send_failed", fmt.Sprintf("发送图片到 %s 失败：%s", target.Name, err.Error()))
+		log.Printf("im image delivery failed: account=%s target=%s platform=%s file=%q err=%v", account.ID, target.ID, account.Platform, image.FileName, err)
 		return DeliveryReceipt{}, err
 	}
 
@@ -408,7 +411,8 @@ func (s *Service) deliverImage(accountID string, targetID string, image Prepared
 	if eventLabel == "" {
 		eventLabel = image.FileName
 	}
-	_ = s.store.AppendEvent(account.ID, "send_image", fmt.Sprintf("已发送图片到 %s：%s", target.Name, trimForEvent(eventLabel)))
+	s.appendEvent(account.ID, "send_image", fmt.Sprintf("已发送图片到 %s：%s", target.Name, trimForEvent(eventLabel)))
+	log.Printf("im image delivery succeeded: account=%s target=%s platform=%s file=%q message_id=%s", account.ID, target.ID, account.Platform, image.FileName, result.MessageID)
 	return DeliveryReceipt{
 		Account:       account,
 		Target:        target,
@@ -418,6 +422,15 @@ func (s *Service) deliverImage(accountID string, targetID string, image Prepared
 		MediaFileName: image.FileName,
 		MediaMimeType: image.MimeType,
 	}, nil
+}
+
+func (s *Service) appendEvent(accountID string, eventType string, message string) {
+	if s == nil || s.store == nil {
+		return
+	}
+	if err := s.store.AppendEvent(accountID, eventType, message); err != nil {
+		log.Printf("append im event failed: account=%s type=%s err=%v", accountID, eventType, err)
+	}
 }
 
 func (s *Service) resolveDelivery(accountID string, targetID string) (Account, Target, Adapter, error) {

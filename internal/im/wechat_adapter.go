@@ -30,7 +30,8 @@ const (
 )
 
 type WeChatAdapter struct {
-	client *http.Client
+	client     *http.Client
+	cdnBaseURL string
 
 	mu     sync.Mutex
 	logins map[string]*activeWeChatLogin
@@ -60,8 +61,9 @@ type weChatQRStatusResponse struct {
 
 func NewWeChatAdapter() *WeChatAdapter {
 	return &WeChatAdapter{
-		client: &http.Client{Timeout: weChatDefaultRequestTTL},
-		logins: make(map[string]*activeWeChatLogin),
+		client:     &http.Client{Timeout: weChatDefaultRequestTTL},
+		cdnBaseURL: weChatDefaultCDNBaseURL,
+		logins:     make(map[string]*activeWeChatLogin),
 	}
 }
 

@@ -600,5 +600,5 @@ func scanTarget(scanner interface {
 
 func (s *Store) nextID(prefix string) string {
 	value := atomic.AddUint64(&s.seq, 1)
-	return fmt.Sprintf("%s_%d", prefix, value)
+	return fmt.Sprintf("%s_%d_%d", prefix, time.Now().UnixNano(), value)
 }
