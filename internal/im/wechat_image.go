@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -33,19 +34,32 @@ type weChatUploadedImage struct {
 }
 
 func (a *WeChatAdapter) SendImage(ctx context.Context, account Account, target Target, image PreparedImage, caption string) (ImageSendResult, error) {
+	log.Printf(
+		"im wechat adapter send image start: account=%s target=%s file=%q mime=%s size=%d caption_len=%d base_url=%s",
+		logSafeID(account.RemoteAccountID),
+		logSafeID(target.TargetUserID),
+		image.FileName,
+		image.MimeType,
+		image.Size,
+		logTextLen(caption),
+		logSafeBaseURL(account.BaseURL),
+	)
 	if strings.TrimSpace(caption) != "" {
 		if _, err := a.SendText(ctx, account, target, caption); err != nil {
+			log.Printf("im wechat adapter send image failed: account=%s target=%s stage=caption_text err=%v", logSafeID(account.RemoteAccountID), logSafeID(target.TargetUserID), err)
 			return ImageSendResult{}, err
 		}
 	}
 
 	uploaded, err := a.uploadImage(ctx, account, target, image)
 	if err != nil {
+		log.Printf("im wechat adapter send image failed: account=%s target=%s stage=upload err=%v", logSafeID(account.RemoteAccountID), logSafeID(target.TargetUserID), err)
 		return ImageSendResult{}, err
 	}
 
 	clientID, err := randomWeChatToken(12)
 	if err != nil {
+		log.Printf("im wechat adapter send image failed: account=%s target=%s stage=message_id err=%v", logSafeID(account.RemoteAccountID), logSafeID(target.TargetUserID), err)
 		return ImageSendResult{}, err
 	}
 
@@ -75,16 +89,20 @@ func (a *WeChatAdapter) SendImage(ctx context.Context, account Account, target T
 		},
 	})
 	if err != nil {
+		log.Printf("im wechat adapter send image failed: account=%s target=%s stage=encode err=%v", logSafeID(account.RemoteAccountID), logSafeID(target.TargetUserID), err)
 		return ImageSendResult{}, fmt.Errorf("encode wechat image message body: %w", err)
 	}
 
 	if _, err := a.postJSON(ctx, account.BaseURL, "ilink/bot/sendmessage", account.Token, body); err != nil {
+		log.Printf("im wechat adapter send image failed: account=%s target=%s stage=sendmessage err=%v", logSafeID(account.RemoteAccountID), logSafeID(target.TargetUserID), err)
 		return ImageSendResult{}, err
 	}
+	log.Printf("im wechat adapter send image succeeded: account=%s target=%s file=%q message_id=%s", logSafeID(account.RemoteAccountID), logSafeID(target.TargetUserID), image.FileName, logSafeID(clientID))
 	return ImageSendResult{MessageID: clientID}, nil
 }
 
 func (a *WeChatAdapter) uploadImage(ctx context.Context, account Account, target Target, image PreparedImage) (weChatUploadedImage, error) {
+	log.Printf("im wechat adapter image upload start: account=%s target=%s file=%q size=%d", logSafeID(account.RemoteAccountID), logSafeID(target.TargetUserID), image.FileName, image.Size)
 	content, err := os.ReadFile(image.FilePath)
 	if err != nil {
 		return weChatUploadedImage{}, fmt.Errorf("read image file: %w", err)
@@ -114,6 +132,7 @@ func (a *WeChatAdapter) uploadImage(ctx context.Context, account Account, target
 	if err != nil {
 		return weChatUploadedImage{}, err
 	}
+	log.Printf("im wechat adapter image upload succeeded: account=%s target=%s file=%q file_key=%s encrypted_bytes=%d", logSafeID(account.RemoteAccountID), logSafeID(target.TargetUserID), image.FileName, logSafeID(fileKey), len(ciphertext))
 
 	return weChatUploadedImage{
 		FileKey:                 fileKey,
@@ -124,6 +143,7 @@ func (a *WeChatAdapter) uploadImage(ctx context.Context, account Account, target
 }
 
 func (a *WeChatAdapter) getUploadURL(ctx context.Context, account Account, target Target, fileKey string, rawSize int, rawMD5 string, cipherSize int, aesKeyHex string) (weChatGetUploadURLResponse, error) {
+	log.Printf("im wechat adapter image upload url request: account=%s target=%s file_key=%s raw_bytes=%d encrypted_bytes=%d", logSafeID(account.RemoteAccountID), logSafeID(target.TargetUserID), logSafeID(fileKey), rawSize, cipherSize)
 	body, err := json.Marshal(map[string]any{
 		"filekey":       fileKey,
 		"media_type":    1,
@@ -153,6 +173,7 @@ func (a *WeChatAdapter) getUploadURL(ctx context.Context, account Account, targe
 	if strings.TrimSpace(resp.UploadFullURL) == "" && strings.TrimSpace(resp.UploadParam) == "" {
 		return weChatGetUploadURLResponse{}, fmt.Errorf("wechat upload url response is missing upload_full_url and upload_param")
 	}
+	log.Printf("im wechat adapter image upload url ready: account=%s target=%s file_key=%s", logSafeID(account.RemoteAccountID), logSafeID(target.TargetUserID), logSafeID(fileKey))
 	return resp, nil
 }
 
@@ -166,6 +187,7 @@ func (a *WeChatAdapter) uploadImageCiphertext(ctx context.Context, uploadMeta we
 		return "", fmt.Errorf("build wechat cdn upload request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/octet-stream")
+	log.Printf("im wechat adapter cdn upload start: file_key=%s bytes=%d host=%s", logSafeID(fileKey), len(ciphertext), logSafeBaseURL(uploadURL))
 
 	resp, err := a.client.Do(req)
 	if err != nil {
@@ -182,6 +204,7 @@ func (a *WeChatAdapter) uploadImageCiphertext(ctx context.Context, uploadMeta we
 		if message == "" {
 			message = strings.TrimSpace(string(respBody))
 		}
+		log.Printf("im wechat adapter cdn upload failed: file_key=%s status=%d", logSafeID(fileKey), resp.StatusCode)
 		return "", fmt.Errorf("wechat cdn upload failed: status=%d body=%s", resp.StatusCode, message)
 	}
 
@@ -189,6 +212,7 @@ func (a *WeChatAdapter) uploadImageCiphertext(ctx context.Context, uploadMeta we
 	if downloadParam == "" {
 		return "", fmt.Errorf("wechat cdn upload response is missing x-encrypted-param")
 	}
+	log.Printf("im wechat adapter cdn upload succeeded: file_key=%s", logSafeID(fileKey))
 	return downloadParam, nil
 }
 

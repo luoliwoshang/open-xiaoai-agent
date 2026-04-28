@@ -75,13 +75,20 @@ func (s *Service) Snapshot() Snapshot {
 }
 
 func (s *Service) StartWeChatLogin() (WeChatLoginStart, error) {
+	log.Printf("im wechat login start requested")
 	adapter, ok := s.adapters[PlatformWeChat]
 	if !ok {
 		return WeChatLoginStart{}, fmt.Errorf("wechat adapter is not configured")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	return adapter.StartLogin(ctx)
+	start, err := adapter.StartLogin(ctx)
+	if err != nil {
+		log.Printf("im wechat login start failed: err=%v", err)
+		return WeChatLoginStart{}, err
+	}
+	log.Printf("im wechat login start succeeded: session=%s expires_at=%s", logSafeID(start.SessionKey), start.ExpiresAt.Format(time.RFC3339))
+	return start, nil
 }
 
 func (s *Service) PollWeChatLogin(sessionKey string) (WeChatLoginStatus, error) {
@@ -90,6 +97,7 @@ func (s *Service) PollWeChatLogin(sessionKey string) (WeChatLoginStatus, error) 
 		return WeChatLoginStatus{}, fmt.Errorf("wechat login session key is required")
 	}
 	if pending, ok := s.getPendingWeChatLogin(sessionKey); ok {
+		log.Printf("im wechat login poll hit cached result: session=%s status=%s", logSafeID(sessionKey), pending.Status)
 		return WeChatLoginStatus{
 			Status:    pending.Status,
 			Message:   pending.Message,
@@ -107,8 +115,10 @@ func (s *Service) PollWeChatLogin(sessionKey string) (WeChatLoginStatus, error) 
 
 	result, err := adapter.PollLogin(ctx, sessionKey)
 	if err != nil {
+		log.Printf("im wechat login poll failed: session=%s err=%v", logSafeID(sessionKey), err)
 		return WeChatLoginStatus{}, err
 	}
+	log.Printf("im wechat login poll result: session=%s status=%s base_url=%s", logSafeID(sessionKey), result.Status, logSafeBaseURL(result.BaseURL))
 
 	status := WeChatLoginStatus{
 		Status:  result.Status,
@@ -132,6 +142,7 @@ func (s *Service) ConfirmWeChatLogin(sessionKey string) (Account, error) {
 	if sessionKey == "" {
 		return Account{}, fmt.Errorf("wechat login session key is required")
 	}
+	log.Printf("im wechat login confirm requested: session=%s", logSafeID(sessionKey))
 
 	result, ok := s.getPendingWeChatLogin(sessionKey)
 	if !ok {
@@ -157,6 +168,7 @@ func (s *Service) ConfirmWeChatLogin(sessionKey string) (Account, error) {
 	}
 
 	s.deletePendingWeChatLogin(sessionKey)
+	log.Printf("im wechat login confirm succeeded: account=%s owner=%s base_url=%s", logSafeID(account.RemoteAccountID), logSafeID(account.OwnerUserID), logSafeBaseURL(account.BaseURL))
 	return account, nil
 }
 
@@ -177,6 +189,7 @@ func (s *Service) UpsertTarget(accountID string, name string, targetUserID strin
 	if err := s.store.AppendEvent(accountID, "target", fmt.Sprintf("更新触达目标：%s", target.Name)); err != nil {
 		log.Printf("append im target event failed: %v", err)
 	}
+	log.Printf("im target upsert succeeded: account=%s target=%s name=%q default=%t", logSafeID(accountID), logSafeID(target.ID), target.Name, target.IsDefault)
 	return target, nil
 }
 
@@ -198,6 +211,7 @@ func (s *Service) SetDefaultTarget(accountID string, targetID string) error {
 	if err := s.store.SetDefaultTarget(accountID, targetID); err != nil {
 		return err
 	}
+	log.Printf("im target default updated: account=%s target=%s", logSafeID(accountID), logSafeID(targetID))
 	return nil
 }
 
@@ -217,6 +231,7 @@ func (s *Service) DeleteTarget(targetID string) error {
 	if err := s.store.DeleteTarget(targetID); err != nil {
 		return err
 	}
+	log.Printf("im target deleted: account=%s target=%s", logSafeID(target.AccountID), logSafeID(target.ID))
 	return s.repairDeliveryConfigAfterMutation(target.AccountID, target.ID)
 }
 
@@ -233,6 +248,7 @@ func (s *Service) DeleteAccount(accountID string) error {
 	if err := s.store.DeleteAccount(accountID); err != nil {
 		return err
 	}
+	log.Printf("im account deleted: account=%s", logSafeID(accountID))
 	return s.repairDeliveryConfigAfterMutation(accountID, "")
 }
 
@@ -263,7 +279,12 @@ func (s *Service) UpdateDeliveryConfig(enabled bool, accountID string, targetID 
 		}
 	}
 
-	return s.settings.UpdateIMDelivery(enabled, accountID, targetID)
+	snapshot, err := s.settings.UpdateIMDelivery(enabled, accountID, targetID)
+	if err != nil {
+		return settings.Snapshot{}, err
+	}
+	log.Printf("im delivery config updated: enabled=%t account=%s target=%s", enabled, logSafeID(accountID), logSafeID(targetID))
+	return snapshot, nil
 }
 
 func (s *Service) SendTextToDefaultChannel(text string) (DeliveryReceipt, error) {
@@ -280,6 +301,7 @@ func (s *Service) SendTextToDefaultChannel(text string) (DeliveryReceipt, error)
 	if strings.TrimSpace(cfg.IMSelectedAccountID) == "" || strings.TrimSpace(cfg.IMSelectedTargetID) == "" {
 		return DeliveryReceipt{}, fmt.Errorf("默认渠道尚未配置，请先保存账号和触达目标")
 	}
+	log.Printf("im debug send text requested: account=%s target=%s text_len=%d", logSafeID(cfg.IMSelectedAccountID), logSafeID(cfg.IMSelectedTargetID), logTextLen(text))
 
 	return s.deliverText(deliveryRequest{
 		AccountID: cfg.IMSelectedAccountID,
@@ -297,9 +319,19 @@ func (s *Service) SendImageToDefaultChannel(req ImageSendRequest) (DeliveryRecei
 	if strings.TrimSpace(cfg.IMSelectedAccountID) == "" || strings.TrimSpace(cfg.IMSelectedTargetID) == "" {
 		return DeliveryReceipt{}, fmt.Errorf("默认渠道尚未配置，请先保存账号和触达目标")
 	}
+	log.Printf(
+		"im debug send image requested: account=%s target=%s file=%q mime=%s bytes=%d caption_len=%d",
+		logSafeID(cfg.IMSelectedAccountID),
+		logSafeID(cfg.IMSelectedTargetID),
+		strings.TrimSpace(req.FileName),
+		strings.TrimSpace(req.MimeType),
+		len(req.Content),
+		logTextLen(req.Caption),
+	)
 
 	prepared, err := s.mediaCache.StoreImage(req)
 	if err != nil {
+		log.Printf("im debug send image prepare failed: account=%s target=%s err=%v", logSafeID(cfg.IMSelectedAccountID), logSafeID(cfg.IMSelectedTargetID), err)
 		return DeliveryReceipt{}, err
 	}
 	return s.deliverImage(cfg.IMSelectedAccountID, cfg.IMSelectedTargetID, prepared, req.Caption)
@@ -342,6 +374,7 @@ func (s *Service) MirrorText(text string) {
 		TargetID:  cfg.IMSelectedTargetID,
 		Text:      text,
 	}
+	log.Printf("im mirror text queued: account=%s target=%s text_len=%d", logSafeID(request.AccountID), logSafeID(request.TargetID), logTextLen(text))
 
 	select {
 	case s.deliveries <- request:
@@ -368,9 +401,11 @@ func (s *Service) deliverText(request deliveryRequest) (DeliveryReceipt, error) 
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
+	log.Printf("im text delivery started: account=%s target=%s platform=%s text_len=%d", logSafeID(account.ID), logSafeID(target.ID), account.Platform, logTextLen(request.Text))
 
 	result, err := adapter.SendText(ctx, account, target, request.Text)
 	if err != nil {
+		log.Printf("im text delivery failed: account=%s target=%s platform=%s err=%v", logSafeID(account.ID), logSafeID(target.ID), account.Platform, err)
 		_ = s.store.MarkDeliveryFailure(account.ID, err.Error())
 		_ = s.store.AppendEvent(account.ID, "send_failed", fmt.Sprintf("发送到 %s 失败：%s", target.Name, err.Error()))
 		return DeliveryReceipt{}, err
@@ -378,6 +413,7 @@ func (s *Service) deliverText(request deliveryRequest) (DeliveryReceipt, error) 
 
 	_ = s.store.MarkDeliverySuccess(account.ID)
 	_ = s.store.AppendEvent(account.ID, "send", fmt.Sprintf("已发送到 %s：%s", target.Name, trimForEvent(request.Text)))
+	log.Printf("im text delivery succeeded: account=%s target=%s platform=%s message_id=%s", logSafeID(account.ID), logSafeID(target.ID), account.Platform, logSafeID(result.MessageID))
 	return DeliveryReceipt{
 		Account:   account,
 		Target:    target,
@@ -395,9 +431,20 @@ func (s *Service) deliverImage(accountID string, targetID string, image Prepared
 
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
+	log.Printf(
+		"im image delivery started: account=%s target=%s platform=%s file=%q mime=%s size=%d caption_len=%d",
+		logSafeID(account.ID),
+		logSafeID(target.ID),
+		account.Platform,
+		image.FileName,
+		image.MimeType,
+		image.Size,
+		logTextLen(caption),
+	)
 
 	result, err := adapter.SendImage(ctx, account, target, image, caption)
 	if err != nil {
+		log.Printf("im image delivery failed: account=%s target=%s platform=%s file=%q err=%v", logSafeID(account.ID), logSafeID(target.ID), account.Platform, image.FileName, err)
 		_ = s.store.MarkDeliveryFailure(account.ID, err.Error())
 		_ = s.store.AppendEvent(account.ID, "send_failed", fmt.Sprintf("发送图片到 %s 失败：%s", target.Name, err.Error()))
 		return DeliveryReceipt{}, err
@@ -409,6 +456,7 @@ func (s *Service) deliverImage(accountID string, targetID string, image Prepared
 		eventLabel = image.FileName
 	}
 	_ = s.store.AppendEvent(account.ID, "send_image", fmt.Sprintf("已发送图片到 %s：%s", target.Name, trimForEvent(eventLabel)))
+	log.Printf("im image delivery succeeded: account=%s target=%s platform=%s file=%q message_id=%s", logSafeID(account.ID), logSafeID(target.ID), account.Platform, image.FileName, logSafeID(result.MessageID))
 	return DeliveryReceipt{
 		Account:       account,
 		Target:        target,

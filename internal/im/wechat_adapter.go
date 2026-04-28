@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math/big"
 	"net/http"
 	"net/url"
@@ -70,8 +71,10 @@ func (a *WeChatAdapter) Platform() string {
 }
 
 func (a *WeChatAdapter) StartLogin(ctx context.Context) (WeChatLoginStart, error) {
+	log.Printf("im wechat adapter login start: base_url=%s", logSafeBaseURL(weChatFixedBaseURL))
 	body, err := a.get(ctx, weChatFixedBaseURL, "ilink/bot/get_bot_qrcode?bot_type="+weChatDefaultBotType)
 	if err != nil {
+		log.Printf("im wechat adapter login start failed: err=%v", err)
 		return WeChatLoginStart{}, err
 	}
 
@@ -104,12 +107,14 @@ func (a *WeChatAdapter) StartLogin(ctx context.Context) (WeChatLoginStart, error
 	a.purgeExpiredLoginsLocked()
 	a.logins[sessionKey] = login
 
-	return WeChatLoginStart{
+	start := WeChatLoginStart{
 		SessionKey:    sessionKey,
 		QRRawText:     payload.QRCodeImgContent,
 		QRCodeDataURL: dataURL,
 		ExpiresAt:     login.ExpiresAt,
-	}, nil
+	}
+	log.Printf("im wechat adapter login qr ready: session=%s expires_at=%s", logSafeID(sessionKey), start.ExpiresAt.Format(time.RFC3339))
+	return start, nil
 }
 
 func (a *WeChatAdapter) PollLogin(ctx context.Context, sessionKey string) (WeChatLoginResult, error) {
@@ -131,6 +136,7 @@ func (a *WeChatAdapter) PollLogin(ctx context.Context, sessionKey string) (WeCha
 
 	body, err := a.get(ctx, currentBaseURL, "ilink/bot/get_qrcode_status?qrcode="+url.QueryEscape(qrCode))
 	if err != nil {
+		log.Printf("im wechat adapter login poll request failed: session=%s base_url=%s err=%v", logSafeID(sessionKey), logSafeBaseURL(currentBaseURL), err)
 		return WeChatLoginResult{}, err
 	}
 
@@ -141,8 +147,10 @@ func (a *WeChatAdapter) PollLogin(ctx context.Context, sessionKey string) (WeCha
 
 	switch payload.Status {
 	case "wait":
+		log.Printf("im wechat adapter login poll status: session=%s status=wait", logSafeID(sessionKey))
 		return WeChatLoginResult{Status: "pending", Message: "等待扫码。"}, nil
 	case "scaned":
+		log.Printf("im wechat adapter login poll status: session=%s status=scaned", logSafeID(sessionKey))
 		return WeChatLoginResult{Status: "scanned", Message: "已扫码，请在微信里确认授权。"}, nil
 	case "scaned_but_redirect":
 		if host := strings.TrimSpace(payload.RedirectHost); host != "" {
@@ -152,14 +160,17 @@ func (a *WeChatAdapter) PollLogin(ctx context.Context, sessionKey string) (WeCha
 			}
 			a.mu.Unlock()
 		}
+		log.Printf("im wechat adapter login poll status: session=%s status=redirect redirect_host=%s", logSafeID(sessionKey), strings.TrimSpace(payload.RedirectHost))
 		return WeChatLoginResult{Status: "scanned", Message: "已扫码，正在切换微信侧节点，请继续确认。"}, nil
 	case "expired":
 		a.mu.Lock()
 		delete(a.logins, strings.TrimSpace(sessionKey))
 		a.mu.Unlock()
+		log.Printf("im wechat adapter login poll status: session=%s status=expired", logSafeID(sessionKey))
 		return WeChatLoginResult{Status: "expired", Message: "二维码已过期，请重新发起扫码。"}, nil
 	case "confirmed":
 		if strings.TrimSpace(payload.BotToken) == "" || strings.TrimSpace(payload.ILinkBotID) == "" {
+			log.Printf("im wechat adapter login poll failed: session=%s reason=incomplete_account_payload", logSafeID(sessionKey))
 			return WeChatLoginResult{Status: "failed", Message: "微信登录成功，但返回的账号信息不完整。"}, nil
 		}
 
@@ -170,19 +181,22 @@ func (a *WeChatAdapter) PollLogin(ctx context.Context, sessionKey string) (WeCha
 		if baseURL == "" {
 			baseURL = currentBaseURL
 		}
-		return WeChatLoginResult{
+		result := WeChatLoginResult{
 			Status:          "confirmed",
 			Message:         "微信账号登录成功。",
 			RemoteAccountID: strings.TrimSpace(payload.ILinkBotID),
 			OwnerUserID:     strings.TrimSpace(payload.ILinkUserID),
 			BaseURL:         baseURL,
 			Token:           strings.TrimSpace(payload.BotToken),
-		}, nil
+		}
+		log.Printf("im wechat adapter login poll status: session=%s status=confirmed account=%s owner=%s base_url=%s", logSafeID(sessionKey), logSafeID(result.RemoteAccountID), logSafeID(result.OwnerUserID), logSafeBaseURL(result.BaseURL))
+		return result, nil
 	default:
 		message := strings.TrimSpace(payload.ErrorMessage)
 		if message == "" {
 			message = "微信登录状态异常。"
 		}
+		log.Printf("im wechat adapter login poll failed: session=%s status=%s message=%q", logSafeID(sessionKey), strings.TrimSpace(payload.Status), message)
 		return WeChatLoginResult{Status: "failed", Message: message}, nil
 	}
 }
@@ -192,8 +206,10 @@ func (a *WeChatAdapter) SendText(ctx context.Context, account Account, target Ta
 	if text == "" {
 		return TextSendResult{}, fmt.Errorf("wechat text message is empty")
 	}
+	log.Printf("im wechat adapter send text start: account=%s target=%s text_len=%d base_url=%s", logSafeID(account.RemoteAccountID), logSafeID(target.TargetUserID), logTextLen(text), logSafeBaseURL(account.BaseURL))
 	clientID, err := randomWeChatToken(12)
 	if err != nil {
+		log.Printf("im wechat adapter send text failed: account=%s target=%s err=%v", logSafeID(account.RemoteAccountID), logSafeID(target.TargetUserID), err)
 		return TextSendResult{}, err
 	}
 
@@ -218,12 +234,15 @@ func (a *WeChatAdapter) SendText(ctx context.Context, account Account, target Ta
 		},
 	})
 	if err != nil {
+		log.Printf("im wechat adapter send text failed: account=%s target=%s stage=encode err=%v", logSafeID(account.RemoteAccountID), logSafeID(target.TargetUserID), err)
 		return TextSendResult{}, fmt.Errorf("encode wechat send message body: %w", err)
 	}
 
 	if _, err := a.postJSON(ctx, account.BaseURL, "ilink/bot/sendmessage", account.Token, body); err != nil {
+		log.Printf("im wechat adapter send text failed: account=%s target=%s stage=sendmessage err=%v", logSafeID(account.RemoteAccountID), logSafeID(target.TargetUserID), err)
 		return TextSendResult{}, err
 	}
+	log.Printf("im wechat adapter send text succeeded: account=%s target=%s message_id=%s", logSafeID(account.RemoteAccountID), logSafeID(target.TargetUserID), logSafeID(clientID))
 	return TextSendResult{MessageID: clientID}, nil
 }
 
@@ -245,6 +264,7 @@ func (a *WeChatAdapter) get(ctx context.Context, baseURL string, endpoint string
 		return nil, fmt.Errorf("read wechat get response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		log.Printf("im wechat adapter get failed: endpoint=%s status=%d base_url=%s", endpoint, resp.StatusCode, logSafeBaseURL(baseURL))
 		return nil, fmt.Errorf("wechat get request failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return body, nil
@@ -274,6 +294,7 @@ func (a *WeChatAdapter) postJSON(ctx context.Context, baseURL string, endpoint s
 		return nil, fmt.Errorf("read wechat post response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		log.Printf("im wechat adapter post failed: endpoint=%s status=%d base_url=%s", endpoint, resp.StatusCode, logSafeBaseURL(baseURL))
 		return nil, fmt.Errorf("wechat post request failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
 	return respBody, nil
