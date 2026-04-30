@@ -8,11 +8,12 @@ type Props<T extends string> = {
   tabs: Tab<T>[]
   value: T
   onChange: (value: T) => void
+  className?: string
 }
 
-export function PillTabs<T extends string>({ tabs, value, onChange }: Props<T>) {
+export function PillTabs<T extends string>({ tabs, value, onChange, className }: Props<T>) {
   return (
-    <div className="pill-tabs" role="tablist">
+    <div className={className ? `pill-tabs ${className}` : 'pill-tabs'} role="tablist">
       {tabs.map((tab) => {
         const active = tab.key === value
         return (

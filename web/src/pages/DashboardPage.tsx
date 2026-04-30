@@ -1,10 +1,15 @@
-import { BellDot, FolderKanban, MessageCircleMore, Send } from 'lucide-react'
+import { Ban, CircleCheckBig, CircleOff, FolderKanban, PlayCircle, RefreshCw } from 'lucide-react'
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
-import { countByState, latest } from '../lib/dashboard'
+import { countByState, formatTime, latest } from '../lib/dashboard'
 import type { ClaudeRecord, ConversationSnapshot, DashboardState, TaskEvent } from '../types'
-import { ConversationPane } from '../components/dashboard/ConversationPane'
-import { TaskDetailPane, type TaskDetailTab } from '../components/dashboard/TaskDetailPane'
+import { TaskDetailPane } from '../components/dashboard/TaskDetailPane'
 import { TaskListPane } from '../components/dashboard/TaskListPane'
+import {
+  ClaudeRecordCard,
+  RecentConversationCard,
+  TaskArtifactsCard,
+  TaskEventsCard,
+} from '../components/dashboard/TaskSideCards'
 
 type Props = {
   data: DashboardState
@@ -15,7 +20,7 @@ type Props = {
 
 export function DashboardPage({ data, loading, error, setData: _setData }: Props) {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
-  const [detailTab, setDetailTab] = useState<TaskDetailTab>('overview')
+  const [lastRefreshedAt, setLastRefreshedAt] = useState(() => new Date())
 
   useEffect(() => {
     if (data.tasks.length === 0) {
@@ -27,6 +32,11 @@ export function DashboardPage({ data, loading, error, setData: _setData }: Props
     }
     setSelectedTaskId(data.tasks[0].id)
   }, [data.tasks, selectedTaskId])
+
+  useEffect(() => {
+    if (loading) return
+    setLastRefreshedAt(new Date())
+  }, [data, loading])
 
   const heroTask = latest(data.tasks)
   const selectedTask = data.tasks.find((task) => task.id === selectedTaskId) ?? heroTask ?? null
@@ -59,86 +69,79 @@ export function DashboardPage({ data, loading, error, setData: _setData }: Props
     return data.conversations[0] ?? null
   }, [data.conversations])
 
-  const overviewCards = useMemo(() => {
+  const stats = useMemo(() => {
     return [
-      {
-        label: '排队中的事情',
-        value: data.tasks.length,
-        note: '今天小爱接到的任务',
-        Icon: FolderKanban,
-        tone: 'peach',
-      },
-      {
-        label: '正在处理',
-        value: countByState(data.tasks, 'running'),
-        note: '后台持续推进',
-        Icon: Send,
-        tone: 'mint',
-      },
-      {
-        label: '待补报',
-        value: data.tasks.filter((task) => task.report_pending).length,
-        note: '下次聊天会顺带告诉你',
-        Icon: BellDot,
-        tone: 'sky',
-      },
-      {
-        label: '最近会话',
-        value: activeConversation?.messages.length ?? 0,
-        note: '上下文还在记着',
-        Icon: MessageCircleMore,
-        tone: 'butter',
-      },
+      { label: '任务总数', value: data.tasks.length, Icon: FolderKanban, tone: 'neutral' },
+      { label: '运行中', value: countByState(data.tasks, 'running'), Icon: PlayCircle, tone: 'running' },
+      { label: '已完成', value: countByState(data.tasks, 'completed'), Icon: CircleCheckBig, tone: 'completed' },
+      { label: '失败', value: countByState(data.tasks, 'failed'), Icon: CircleOff, tone: 'failed' },
+      { label: '已取消', value: countByState(data.tasks, 'canceled'), Icon: Ban, tone: 'canceled' },
     ]
-  }, [activeConversation?.messages.length, data.tasks])
+  }, [data.tasks])
 
   return (
-    <main className="page-shell dashboard-shell">
-      <header className="page-hero">
-        <div className="page-hero-copy">
-          <p className="section-eyebrow">TODAY WITH XIAOAI</p>
-          <h2>{selectedTask ? `这会儿正围着「${selectedTask.title}」忙活` : '先和小爱说一句话，让今天开始转起来'}</h2>
-          <p>
-            这里不再混入系统设置和技术说明。你只会看到现在最有用的三类信息：任务进展、交付文件、最近对话。
-          </p>
+    <main className="page-shell dashboard-shell dashboard-page">
+      <header className="dashboard-header">
+        <div className="dashboard-header-title">
+          <div className="dashboard-title-row">
+            <h2>Dashboard 首页</h2>
+            <span className={`service-pill ${error ? 'service-pill-danger' : ''}`}>{error ? '服务异常' : '服务正常'}</span>
+          </div>
+          <p>把任务、执行过程、交付文件和最近会话放回一个稳定、清爽、可追踪的工作台里。</p>
         </div>
 
-        <div className="hero-metrics">
-          {overviewCards.map(({ Icon, label, note, tone, value }) => (
-            <article className={`hero-metric hero-metric-${tone}`} key={label}>
+        <div className="dashboard-header-stats">
+          {stats.map(({ Icon, label, tone, value }) => (
+            <article className={`dashboard-stat-card dashboard-stat-card-${tone}`} key={label}>
               <span>
-                <Icon size={16} />
+                <Icon size={18} />
                 {label}
               </span>
               <strong>{value}</strong>
-              <small>{note}</small>
             </article>
           ))}
+
+          <article className="dashboard-stat-card dashboard-stat-card-refresh">
+            <span>
+              <RefreshCw size={18} />
+              刷新
+            </span>
+            <strong>{loading ? '同步中' : '已同步'}</strong>
+            <small>最近更新: {formatTime(lastRefreshedAt.toISOString())}</small>
+          </article>
         </div>
       </header>
 
-      {error ? <div className="banner-error">接口暂时有点卡住了：{error}</div> : null}
-      {loading ? <div className="banner-hint">正在更新最新状态…</div> : null}
+      {error ? <div className="banner-error">接口当前不可用：{error}</div> : null}
 
-      <section className="dashboard-layout">
-        <div className="dashboard-rail">
-          <TaskListPane tasks={data.tasks} selectedTaskID={selectedTask?.id ?? null} onSelect={(taskID) => {
-            setSelectedTaskId(taskID)
-            setDetailTab('overview')
-          }} />
+      <section className="dashboard-reference-grid">
+        <div className="dashboard-left-column">
+          <TaskListPane
+            tasks={data.tasks}
+            selectedTaskID={selectedTask?.id ?? null}
+            onSelect={(taskID) => {
+              setSelectedTaskId(taskID)
+            }}
+          />
         </div>
 
-        <div className="dashboard-stage">
+        <div className="dashboard-center-column">
           <TaskDetailPane
             artifacts={selectedArtifacts}
             claudeRecord={claudeRecord}
             events={selectedEvents}
-            onTabChange={setDetailTab}
-            tab={detailTab}
             task={selectedTask}
           />
+        </div>
 
-          <ConversationPane conversation={activeConversation} />
+        <div className="dashboard-right-column">
+          <TaskEventsCard events={selectedEvents} />
+          <TaskArtifactsCard artifacts={selectedArtifacts} />
+          <ClaudeRecordCard claudeRecord={claudeRecord} />
+          <RecentConversationCard
+            lastActive={activeConversation?.last_active ?? ''}
+            messages={activeConversation?.messages ?? []}
+          />
         </div>
       </section>
     </main>

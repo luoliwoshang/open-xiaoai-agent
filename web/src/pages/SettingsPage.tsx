@@ -80,8 +80,8 @@ const settingsSections: SettingsSection[] = [
 ]
 
 const imViews: Array<{ key: IMViewKey; label: string; caption: string }> = [
-  { key: 'delivery', label: '镜像规则', caption: '自动回复怎么转发' },
   { key: 'debug', label: '手动调试', caption: '文本 / 图片 / 文件' },
+  { key: 'delivery', label: '镜像规则', caption: '自动回复怎么转发' },
   { key: 'accounts', label: '微信账号', caption: '扫码与账号管理' },
   { key: 'targets', label: '触达对象', caption: '谁会收到消息' },
 ]
@@ -95,7 +95,7 @@ type Props = {
 
 export function SettingsPage({ data, error, setData, refresh }: Props) {
   const [activeSection, setActiveSection] = useState<SettingsSectionKey>('system')
-  const [activeIMView, setActiveIMView] = useState<IMViewKey>('delivery')
+  const [activeIMView, setActiveIMView] = useState<IMViewKey>('debug')
   const [windowInput, setWindowInput] = useState('300')
   const [windowDirty, setWindowDirty] = useState(false)
   const [settingsSaving, setSettingsSaving] = useState(false)
@@ -628,7 +628,7 @@ export function SettingsPage({ data, error, setData, refresh }: Props) {
             </div>
           ) : (
             <div className="settings-content-stack">
-              <PillTabs tabs={imViews} value={activeIMView} onChange={setActiveIMView} />
+              <PillTabs className="settings-pill-tabs" tabs={imViews} value={activeIMView} onChange={setActiveIMView} />
 
               {activeIMView === 'delivery' ? (
                 <IMDeliveryPanel

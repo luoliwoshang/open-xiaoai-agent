@@ -1,4 +1,5 @@
-import { Clock3, FolderHeart, Sparkles } from 'lucide-react'
+import { Clock3, Funnel, Sparkles } from 'lucide-react'
+import { countByState } from '../../lib/dashboard'
 import { formatTime } from '../../lib/dashboard'
 import type { Task } from '../../types'
 import { EmptyState } from '../ui/EmptyState'
@@ -12,12 +13,25 @@ type Props = {
 }
 
 export function TaskListPane({ tasks, selectedTaskID, onSelect }: Props) {
+  const summary = [
+    { label: '全部', value: tasks.length, tone: 'neutral' },
+    { label: '运行中', value: countByState(tasks, 'running'), tone: 'running' },
+    { label: '已完成', value: countByState(tasks, 'completed'), tone: 'completed' },
+    { label: '失败', value: countByState(tasks, 'failed'), tone: 'failed' },
+    { label: '已取消', value: countByState(tasks, 'canceled'), tone: 'canceled' },
+  ]
+
   return (
     <SectionCard
+      actions={(
+        <span className="card-inline-icon">
+          <Funnel size={16} />
+        </span>
+      )}
       className="dashboard-rail-card"
-      description="把复杂任务交给小爱之后，这里会像任务收纳盒一样把每一条进展都排好。"
-      eyebrow="TASK POCKET"
-      title="任务队列"
+      description="按最近更新时间排序，方便快速切到当前最需要盯住的那条任务。"
+      eyebrow="TASK CENTER"
+      title="任务列表"
     >
       {tasks.length === 0 ? (
         <EmptyState
@@ -25,7 +39,17 @@ export function TaskListPane({ tasks, selectedTaskID, onSelect }: Props) {
           description="先让小爱接一个网页、整理、写作或资料任务，这里就会热闹起来。"
         />
       ) : (
-        <div className="task-list-stack">
+        <div className="task-list-shell">
+          <div className="task-list-summary-grid">
+            {summary.map((item) => (
+              <article className={`task-list-summary-card task-list-summary-${item.tone}`} key={item.label}>
+                <strong>{item.value}</strong>
+                <span>{item.label}</span>
+              </article>
+            ))}
+          </div>
+
+          <div className="task-list-stack">
           {tasks.map((task) => {
             const selected = task.id === selectedTaskID
             return (
@@ -36,33 +60,36 @@ export function TaskListPane({ tasks, selectedTaskID, onSelect }: Props) {
                 type="button"
               >
                 <div className="task-teaser-head">
-                  <StatusBadge state={task.state} />
-                  {task.report_pending ? (
-                    <span className="soft-chip">
-                      <Sparkles size={14} />
-                      待补报
-                    </span>
-                  ) : null}
+                  <div className="task-teaser-copy">
+                    <strong>{task.title}</strong>
+                    <p>{formatTime(task.updated_at)}</p>
+                  </div>
+                  <div className="task-teaser-side">
+                    <StatusBadge state={task.state} />
+                    {task.report_pending ? (
+                      <span className="soft-chip">
+                        <Sparkles size={14} />
+                        待补报
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
 
-                <div className="task-teaser-copy">
-                  <strong>{task.title}</strong>
-                  <p>{task.summary || task.input || '这条任务还没有阶段摘要。'}</p>
-                </div>
+                <p className="task-teaser-summary">{task.summary || task.input || '这条任务还没有阶段摘要。'}</p>
 
                 <div className="task-teaser-meta">
                   <span>
                     <Clock3 size={14} />
-                    {formatTime(task.updated_at)}
+                    {formatTime(task.created_at)}
                   </span>
                   <span>
-                    <FolderHeart size={14} />
                     {task.kind}
                   </span>
                 </div>
               </button>
             )
           })}
+          </div>
         </div>
       )}
     </SectionCard>

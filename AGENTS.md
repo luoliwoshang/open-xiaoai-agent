@@ -512,6 +512,16 @@ UI decisions that were explicitly requested:
 - backend logs should live on their own page and not be mixed into `/api/state`
 - dashboard should feel intentional, not generic admin boilerplate
 
+## Frontend UI Style
+
+When modifying XiaoAiAgent frontend pages, always follow the project UI style guide:
+
+- see `docs/frontend-ui-style-guide.md`
+- keep the cute, bright, modern SaaS dashboard style
+- preserve the blue / purple / mint color direction
+- use rounded cards, soft shadows, readable Chinese UI, and light mascot-style decoration
+- do not introduce unrelated visual styles unless the user explicitly asks for a redesign
+
 ## Testing
 
 Recommended Go validation:
