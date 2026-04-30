@@ -2,9 +2,11 @@ export type TaskState = 'accepted' | 'running' | 'completed' | 'failed' | 'cance
 
 export type Task = {
   id: string
+  plugin?: string
   kind: string
   title: string
   input: string
+  parent_task_id?: string
   state: TaskState
   summary: string
   result: string

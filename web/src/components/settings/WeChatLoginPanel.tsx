@@ -52,7 +52,7 @@ export function WeChatLoginPanel({
         {confirmed ? (
           <div className="settings-login-confirm">
             <p className="settings-note">
-              扫码授权已经完成。确认后，这个微信账号才会加入当前网关账号列表，并自动补一个“扫码用户”默认触达目标。
+              扫码已经完成。只有你确认之后，这个账号才会真正加入系统，并自动补上一个“扫码用户”默认触达对象。
             </p>
 
             {message ? <div className="settings-feedback">{message}</div> : null}
@@ -96,7 +96,7 @@ export function WeChatLoginPanel({
 
             <div className="login-copy">
               <p className="settings-note">
-                当前阶段只做微信文本触达，不做 IM 入站会话。扫码确认后，界面会先展示待添加的账号信息，只有你点确认才会真正保存登录态。
+                扫码确认后，界面会先展示待添加的账号信息。只有你点确认，登录态才会真正保存下来。
               </p>
               {message ? <div className="settings-feedback">{message}</div> : null}
               {error ? <div className="error-banner settings-error">{error}</div> : null}
@@ -115,7 +115,7 @@ export function WeChatLoginPanel({
 
               <div className="settings-actions">
                 <span className="settings-note">
-                  {loading ? '正在拉起微信登录流程。' : polling ? '等待扫码与确认，不会直接把账号写入系统。' : '关闭弹窗后可重新发起一次扫码。'}
+                  {loading ? '正在准备扫码流程。' : polling ? '正在等待扫码与确认，不会自动把账号写进系统。' : '关闭弹窗后可以重新发起一次扫码。'}
                 </span>
               </div>
             </div>

@@ -14,7 +14,7 @@ export function WeChatAccountsPanel({ accounts, loginBusy, onStartLogin, onDelet
       <div className="panel-head compact">
         <div>
           <p className="eyebrow">WECHAT ACCOUNTS</p>
-          <h3>账号管理</h3>
+          <h3>微信账号</h3>
         </div>
         <button className="settings-button" disabled={loginBusy} onClick={() => onStartLogin()} type="button">
           {loginBusy ? '登录流程进行中...' : '新增微信账号'}

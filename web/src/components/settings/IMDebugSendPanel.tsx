@@ -66,13 +66,13 @@ export function IMDebugSendPanel({
       <div className="panel-head compact">
         <div>
           <p className="eyebrow">IM DEBUG</p>
-          <h3>默认渠道调试</h3>
+          <h3>手动调试发送</h3>
         </div>
       </div>
 
       <div className="settings-form">
         <p className="settings-note">
-          这里始终命中当前已经保存的默认渠道，不依赖自动镜像开关。适合单独验证账号、目标和通道是否正常。
+          这里始终命中当前已经保存的默认渠道，不依赖自动镜像开关。适合单独确认这条触达到底通不通。
         </p>
 
         {ready ? (
@@ -96,7 +96,7 @@ export function IMDebugSendPanel({
 
         {configDirty ? (
           <div className="settings-feedback">
-            上方镜像配置还有未保存的修改；调试发送仍然会命中当前已保存的默认渠道。
+            上方还有未保存的修改；这里仍然会命中“已经保存”的默认渠道。
           </div>
         ) : null}
 
@@ -138,7 +138,7 @@ export function IMDebugSendPanel({
             onChange={(event) => onImageFileChange(event.target.files?.[0] ?? null)}
           />
           <span className="settings-note">
-            {imageFileName ? `已选择：${imageFileName}` : '只接受图片文件，服务端会先落到媒体缓存目录，再按微信协议发送。'}
+            {imageFileName ? `已选择：${imageFileName}` : '只接受图片文件。'}
           </span>
         </label>
 
@@ -179,7 +179,7 @@ export function IMDebugSendPanel({
             onChange={(event) => onFileFileChange(event.target.files?.[0] ?? null)}
           />
           <span className="settings-note">
-            {fileFileName ? `已选择：${fileFileName}` : '允许选择任意文件，服务端会先落到媒体缓存目录，再按微信文件消息发送。'}
+            {fileFileName ? `已选择：${fileFileName}` : '可以发送任意文件。'}
           </span>
         </label>
 
