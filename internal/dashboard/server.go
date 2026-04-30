@@ -27,6 +27,7 @@ type Server struct {
 	claude        *complextask.Service
 	conversations interface {
 		SnapshotConversations() []assistant.ConversationSnapshot
+		RuntimeStatus() assistant.RuntimeStatus
 		ResetConversationData() error
 	}
 	settings interface {
@@ -55,6 +56,7 @@ type Server struct {
 
 func New(addr string, tasks *tasks.Manager, claude *complextask.Service, conversations interface {
 	SnapshotConversations() []assistant.ConversationSnapshot
+	RuntimeStatus() assistant.RuntimeStatus
 	ResetConversationData() error
 }, runtimeSettings interface {
 	Snapshot() settings.Snapshot
@@ -125,8 +127,10 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		claudeRecords = s.claude.Snapshot()
 	}
 	conversations := []assistant.ConversationSnapshot(nil)
+	var assistantRuntime assistant.RuntimeStatus
 	if s.conversations != nil {
 		conversations = s.conversations.SnapshotConversations()
+		assistantRuntime = s.conversations.RuntimeStatus()
 	}
 	var runtimeSettings settings.Snapshot
 	if s.settings != nil {
@@ -142,6 +146,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		"artifacts":      artifacts,
 		"claude_records": claudeRecords,
 		"conversations":  conversations,
+		"assistant":      assistantRuntime,
 		"settings":       runtimeSettings,
 		"im":             imState,
 	})

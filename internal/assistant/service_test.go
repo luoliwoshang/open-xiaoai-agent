@@ -120,6 +120,7 @@ func (f fakeTools) Call(ctx context.Context, name string, arguments json.RawMess
 }
 
 type fakeTaskManager struct {
+	mu            sync.Mutex
 	submittedSpec plugin.AsyncTask
 	pendingItems  []tasks.PendingReportItem
 	pendingIDs    []string
@@ -127,6 +128,8 @@ type fakeTaskManager struct {
 }
 
 func (m *fakeTaskManager) Submit(spec plugin.AsyncTask) (tasks.Task, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.submittedSpec = spec
 	return tasks.Task{
 		ID:    "task_1",
@@ -136,13 +139,23 @@ func (m *fakeTaskManager) Submit(spec plugin.AsyncTask) (tasks.Task, error) {
 }
 
 func (m *fakeTaskManager) PendingReports(limit int) ([]tasks.PendingReportItem, []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	_ = limit
 	return append([]tasks.PendingReportItem(nil), m.pendingItems...), append([]string(nil), m.pendingIDs...)
 }
 
 func (m *fakeTaskManager) MarkReported(ids []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.markReported = append([]string(nil), ids...)
 	return nil
+}
+
+func (m *fakeTaskManager) markReportedSnapshot() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.markReported...)
 }
 
 func newTestService(t *testing.T, config Config, intent IntentDecider, reply ReplyStreamer, tools ToolRunner, taskManager TaskManager, spk *speaker.Speaker) *Service {
@@ -153,6 +166,19 @@ func newTestService(t *testing.T, config Config, intent IntentDecider, reply Rep
 		t.Fatalf("New() error = %v", err)
 	}
 	return service
+}
+
+func waitUntil(t *testing.T, timeout time.Duration, fn func() bool) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if fn() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("condition not satisfied before timeout")
 }
 
 func TestHandleASRAbortsBeforeIntent(t *testing.T) {
@@ -223,6 +249,36 @@ func TestHandleASRStopsWhenImmediateAbortFails(t *testing.T) {
 
 	if intentCalled {
 		t.Fatal("intentCalled = true, want false")
+	}
+}
+
+func TestOnASRIgnoresNewInputWhileBusy(t *testing.T) {
+	t.Parallel()
+
+	intentCalled := false
+	service := newTestService(t,
+		Config{AbortAfterASR: true, PostAbortDelay: 0},
+		fakeIntent{
+			onDecide: func(history []llm.Message, text string) llm.IntentDecision {
+				intentCalled = true
+				return llm.IntentDecision{}
+			},
+		},
+		fakeReply{},
+		fakeTools{},
+		&fakeTaskManager{},
+		speaker.New(),
+	)
+
+	service.busy = true
+	service.OnASR(nil, "这句应该被忽略")
+	time.Sleep(50 * time.Millisecond)
+
+	if intentCalled {
+		t.Fatal("intentCalled = true, want false")
+	}
+	if !service.busy {
+		t.Fatal("service.busy = false, want true")
 	}
 }
 
@@ -368,6 +424,106 @@ func TestDeliverPendingReportsUsesChunkedPlayback(t *testing.T) {
 	}
 }
 
+func TestTryDeliverPendingReportsStartsWhenIdle(t *testing.T) {
+	t.Parallel()
+
+	session := &fakeSession{}
+	taskManager := &fakeTaskManager{
+		pendingItems: []tasks.PendingReportItem{{
+			ID:      "task_1",
+			Title:   "刚刚那个任务",
+			State:   tasks.StateCompleted,
+			Summary: "已经处理完成。",
+			Result:  "结果已经准备好了。",
+		}},
+		pendingIDs: []string{"task_1"},
+	}
+	service := newTestService(t,
+		Config{AbortAfterASR: false, PostAbortDelay: 0},
+		fakeIntent{},
+		scriptedReply{
+			onPending: func(ctx context.Context, history []llm.Message, reportContext string, onDelta func(string) error) error {
+				if !strings.Contains(reportContext, "标题：刚刚那个任务") {
+					t.Fatalf("reportContext = %q", reportContext)
+				}
+				return onDelta("对了，刚刚那个任务已经处理好了。")
+			},
+		},
+		fakeTools{},
+		taskManager,
+		speaker.New(),
+	)
+
+	service.lastSession = session
+	service.TryDeliverPendingReports()
+
+	waitUntil(t, time.Second, func() bool {
+		return len(taskManager.markReportedSnapshot()) == 1
+	})
+
+	if got := taskManager.markReportedSnapshot(); len(got) != 1 || got[0] != "task_1" {
+		t.Fatalf("markReported = %#v", got)
+	}
+	history := service.history.Snapshot(session, time.Now())
+	if len(history) == 0 {
+		t.Fatal("history is empty")
+	}
+	last := history[len(history)-1]
+	if last.Role != "assistant" || last.Content != "对了，刚刚那个任务已经处理好了。" {
+		t.Fatalf("last = %+v", last)
+	}
+}
+
+func TestTryDeliverPendingReportsWaitsUntilCurrentTurnFinishes(t *testing.T) {
+	t.Parallel()
+
+	session := &fakeSession{}
+	taskManager := &fakeTaskManager{
+		pendingItems: []tasks.PendingReportItem{{
+			ID:      "task_1",
+			Title:   "后台任务",
+			State:   tasks.StateCompleted,
+			Summary: "已经完成。",
+			Result:  "最终结果已经准备好了。",
+		}},
+		pendingIDs: []string{"task_1"},
+	}
+	service := newTestService(t,
+		Config{AbortAfterASR: false, PostAbortDelay: 0},
+		fakeIntent{},
+		scriptedReply{
+			onPending: func(ctx context.Context, history []llm.Message, reportContext string, onDelta func(string) error) error {
+				return onDelta("对了，后台任务已经完成了。")
+			},
+		},
+		fakeTools{},
+		taskManager,
+		speaker.New(),
+	)
+
+	service.lastSession = session
+	service.busy = true
+
+	service.TryDeliverPendingReports()
+
+	if got := taskManager.markReportedSnapshot(); len(got) != 0 {
+		t.Fatalf("markReported before finish = %#v, want empty", got)
+	}
+	if !service.pendingReportReady {
+		t.Fatal("pendingReportReady = false, want true")
+	}
+
+	service.finishVoiceTurn()
+
+	waitUntil(t, time.Second, func() bool {
+		return len(taskManager.markReportedSnapshot()) == 1
+	})
+
+	if got := taskManager.markReportedSnapshot(); len(got) != 1 || got[0] != "task_1" {
+		t.Fatalf("markReported after finish = %#v", got)
+	}
+}
+
 func TestHandleASRCanDirectReplyForToolCall(t *testing.T) {
 	t.Parallel()
 
@@ -406,6 +562,52 @@ func TestHandleASRCanDirectReplyForToolCall(t *testing.T) {
 
 	if toolReplyCalled {
 		t.Fatal("toolReplyCalled = true, want false")
+	}
+}
+
+func TestHandleASRRoutesContinueChatToolToReply(t *testing.T) {
+	t.Parallel()
+
+	session := &fakeSession{}
+	toolCalled := false
+	replyCalled := false
+	service := newTestService(t,
+		Config{AbortAfterASR: true, PostAbortDelay: 0},
+		fakeIntent{
+			onDecide: func(history []llm.Message, text string) llm.IntentDecision {
+				return llm.IntentDecision{
+					ShouldHandle: true,
+					ShouldAbort:  true,
+					ToolCall: &llm.ToolCall{
+						Name:      "continue_chat",
+						Arguments: json.RawMessage(`{}`),
+					},
+				}
+			},
+		},
+		scriptedReply{
+			onStream: func(ctx context.Context, history []llm.Message, text string, onDelta func(string) error) error {
+				replyCalled = true
+				return onDelta("继续聊。")
+			},
+		},
+		fakeTools{
+			onCall: func(name string) plugin.Result {
+				toolCalled = true
+				return plugin.Result{}
+			},
+		},
+		&fakeTaskManager{},
+		speaker.New(),
+	)
+
+	service.handleASR(session, "你是谁")
+
+	if toolCalled {
+		t.Fatal("toolCalled = true, want false")
+	}
+	if !replyCalled {
+		t.Fatal("replyCalled = false, want true")
 	}
 }
 
@@ -467,10 +669,9 @@ func TestHandleASRForcesExternalReplyWhenIntentSaysNo(t *testing.T) {
 				_ = history
 				_ = text
 				return llm.IntentDecision{
-					ShouldHandle:  false,
-					ShouldAbort:   false,
-					ReplyRequired: false,
-					Reason:        "原生处理",
+					ShouldHandle: false,
+					ShouldAbort:  false,
+					Reason:       "原生处理",
 				}
 			},
 		},
@@ -517,9 +718,8 @@ func TestHandleASRIncludesSessionHistory(t *testing.T) {
 					}
 				}
 				return llm.IntentDecision{
-					ShouldHandle:  true,
-					ShouldAbort:   true,
-					ReplyRequired: true,
+					ShouldHandle: true,
+					ShouldAbort:  true,
 				}
 			},
 		},
@@ -560,9 +760,12 @@ func TestHandleASRUsesSpeculativeReplyWhenEnabled(t *testing.T) {
 				}
 				close(intentMayReturn)
 				return llm.IntentDecision{
-					ShouldHandle:  true,
-					ShouldAbort:   true,
-					ReplyRequired: true,
+					ShouldHandle: true,
+					ShouldAbort:  true,
+					ToolCall: &llm.ToolCall{
+						Name:      "continue_chat",
+						Arguments: json.RawMessage(`{}`),
+					},
 				}
 			},
 		},

@@ -29,8 +29,15 @@ export type DashboardState = {
   artifacts: TaskArtifact[]
   claude_records: ClaudeRecord[]
   conversations: ConversationSnapshot[]
+  assistant: AssistantRuntimeStatus
   settings: SettingsSnapshot
   im: IMSnapshot
+}
+
+export type AssistantRuntimeStatus = {
+  busy: boolean
+  pending_report_ready: boolean
+  has_session: boolean
 }
 
 export type TaskArtifact = {

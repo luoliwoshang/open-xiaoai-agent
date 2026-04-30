@@ -667,6 +667,12 @@ code {
   letter-spacing: -0.04em;
 }
 
+.dashboard-title-pills {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .dashboard-header-title p {
   margin: 0;
   max-width: 42ch;
@@ -698,6 +704,24 @@ code {
   border-color: rgba(239, 90, 100, 0.24);
   background: linear-gradient(180deg, #fff6f7 0%, #fff1f3 100%);
   color: #d84b55;
+}
+
+.service-pill-busy {
+  border-color: rgba(82, 136, 255, 0.24);
+  background: linear-gradient(180deg, #f3f8ff 0%, #edf4ff 100%);
+  color: #286ee6;
+}
+
+.service-pill-pending {
+  border-color: rgba(135, 112, 255, 0.2);
+  background: linear-gradient(180deg, #f8f5ff 0%, #f3efff 100%);
+  color: #7457ef;
+}
+
+.service-pill-neutral {
+  border-color: rgba(151, 179, 235, 0.22);
+  background: linear-gradient(180deg, #fafcff 0%, #f5f8ff 100%);
+  color: #60749b;
 }
 
 .dashboard-header-stats {

@@ -24,10 +24,15 @@ import (
 
 type fakeConversations struct {
 	resetCalls int
+	runtime    assistant.RuntimeStatus
 }
 
 func (f *fakeConversations) SnapshotConversations() []assistant.ConversationSnapshot {
 	return nil
+}
+
+func (f *fakeConversations) RuntimeStatus() assistant.RuntimeStatus {
+	return f.runtime
 }
 
 func (f *fakeConversations) ResetConversationData() error {
@@ -306,6 +311,43 @@ func TestHandleResetRejectsNonPost(t *testing.T) {
 
 	if recorder.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestHandleStateIncludesAssistantRuntime(t *testing.T) {
+	t.Parallel()
+
+	conversations := &fakeConversations{
+		runtime: assistant.RuntimeStatus{
+			Busy:               true,
+			PendingReportReady: true,
+			HasSession:         true,
+		},
+	}
+	server := New(":0", nil, nil, conversations, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeIM{}, &fakeLogs{})
+	req := httptest.NewRequest(http.MethodGet, "/api/state", nil)
+	recorder := httptest.NewRecorder()
+
+	server.handleState(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+
+	var payload struct {
+		Assistant assistant.RuntimeStatus `json:"assistant"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if !payload.Assistant.Busy {
+		t.Fatal("Assistant.Busy = false, want true")
+	}
+	if !payload.Assistant.PendingReportReady {
+		t.Fatal("Assistant.PendingReportReady = false, want true")
+	}
+	if !payload.Assistant.HasSession {
+		t.Fatal("Assistant.HasSession = false, want true")
 	}
 }
 

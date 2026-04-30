@@ -1,4 +1,5 @@
 import type {
+  AssistantRuntimeStatus,
   DashboardState,
   IMTarget,
   SettingsSnapshot,
@@ -14,6 +15,11 @@ export const emptyState: DashboardState = {
   artifacts: [],
   claude_records: [],
   conversations: [],
+  assistant: {
+    busy: false,
+    pending_report_ready: false,
+    has_session: false,
+  },
   settings: {
     session_window_seconds: 300,
     im_delivery_enabled: false,
@@ -95,6 +101,7 @@ export function normalizeState(raw: Partial<DashboardState> | undefined): Dashbo
       ...conversation,
       messages: conversation?.messages ?? [],
     })),
+    assistant: normalizeAssistantRuntime(raw?.assistant),
     settings: normalizeSettings(raw?.settings),
     im: {
       accounts: raw?.im?.accounts ?? [],
@@ -110,5 +117,13 @@ export function normalizeSettings(raw: Partial<SettingsSnapshot> | undefined): S
     im_delivery_enabled: raw?.im_delivery_enabled ?? false,
     im_selected_account_id: raw?.im_selected_account_id ?? '',
     im_selected_target_id: raw?.im_selected_target_id ?? '',
+  }
+}
+
+function normalizeAssistantRuntime(raw: Partial<AssistantRuntimeStatus> | undefined): AssistantRuntimeStatus {
+  return {
+    busy: raw?.busy ?? false,
+    pending_report_ready: raw?.pending_report_ready ?? false,
+    has_session: raw?.has_session ?? false,
   }
 }

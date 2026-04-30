@@ -79,13 +79,41 @@ export function DashboardPage({ data, loading, error, setData: _setData }: Props
     ]
   }, [data.tasks])
 
+  const assistantRuntimePill = useMemo(() => {
+    if (data.assistant.busy) {
+      return {
+        label: '语音处理中',
+        className: 'service-pill service-pill-busy',
+      }
+    }
+    if (data.assistant.pending_report_ready) {
+      return {
+        label: '待补报',
+        className: 'service-pill service-pill-pending',
+      }
+    }
+    if (!data.assistant.has_session) {
+      return {
+        label: '等待连接',
+        className: 'service-pill service-pill-neutral',
+      }
+    }
+    return {
+      label: '语音空闲',
+      className: 'service-pill service-pill-neutral',
+    }
+  }, [data.assistant])
+
   return (
     <main className="page-shell dashboard-shell dashboard-page">
       <header className="dashboard-header">
         <div className="dashboard-header-title">
           <div className="dashboard-title-row">
             <h2>Dashboard 首页</h2>
-            <span className={`service-pill ${error ? 'service-pill-danger' : ''}`}>{error ? '服务异常' : '服务正常'}</span>
+            <div className="dashboard-title-pills">
+              <span className={`service-pill ${error ? 'service-pill-danger' : ''}`}>{error ? '服务异常' : '服务正常'}</span>
+              <span className={assistantRuntimePill.className}>{assistantRuntimePill.label}</span>
+            </div>
           </div>
           <p>把任务、执行过程、交付文件和最近会话放回一个稳定、清爽、可追踪的工作台里。</p>
         </div>

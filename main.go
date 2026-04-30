@@ -101,6 +101,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	taskManager.SetPendingReportHook(asrService.TryDeliverPendingReports)
 
 	srv := server.New(cfg, asrService.OnASR)
 	go func() {

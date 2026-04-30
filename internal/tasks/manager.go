@@ -20,6 +20,7 @@ type Manager struct {
 	seq           uint64
 	cancels       map[string]context.CancelFunc
 	artifactCache *artifactCache
+	onReportReady func()
 }
 
 func NewManager(dsn string, artifactCacheDir string) (*Manager, error) {
@@ -96,6 +97,14 @@ func (m *Manager) Submit(spec plugin.AsyncTask) (Task, error) {
 	return task, nil
 }
 
+// SetPendingReportHook 注册一个轻量回调：当任务刚进入“有待补报结果”的状态时，通知上层去尝试补报。
+// 这不是持续轮询数据库，而是任务状态变化时的一次性事件触发。
+func (m *Manager) SetPendingReportHook(fn func()) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onReportReady = fn
+}
+
 func (m *Manager) runTask(ctx context.Context, taskID string, run func(context.Context, plugin.AsyncReporter) (string, error)) {
 	m.updateTask(taskID, func(task *Task, events *[]Event) {
 		task.State = StateRunning
@@ -130,6 +139,7 @@ func (m *Manager) runTask(ctx context.Context, taskID string, run func(context.C
 			})
 		})
 		m.clearCancel(taskID)
+		m.notifyPendingReportReady()
 		return
 	}
 
@@ -151,14 +161,14 @@ func (m *Manager) runTask(ctx context.Context, taskID string, run func(context.C
 		})
 	})
 	m.clearCancel(taskID)
+	m.notifyPendingReportReady()
 }
 
 func (m *Manager) CancelLatest() (*Task, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	task := m.latestActiveTaskLocked()
 	if task == nil {
+		m.mu.Unlock()
 		return nil, nil
 	}
 	now := time.Now()
@@ -178,9 +188,12 @@ func (m *Manager) CancelLatest() (*Task, error) {
 		delete(m.cancels, task.ID)
 	}
 	if err := m.store.Save(m.state); err != nil {
+		m.mu.Unlock()
 		return nil, err
 	}
 	copyTask := *task
+	m.mu.Unlock()
+	m.notifyPendingReportReady()
 	return &copyTask, nil
 }
 
@@ -489,6 +502,16 @@ func (m *Manager) clearCancel(taskID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.cancels, taskID)
+}
+
+func (m *Manager) notifyPendingReportReady() {
+	m.mu.Lock()
+	fn := m.onReportReady
+	m.mu.Unlock()
+	if fn == nil {
+		return
+	}
+	go fn()
 }
 
 func (m *Manager) Reset() error {
