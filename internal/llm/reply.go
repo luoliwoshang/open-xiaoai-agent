@@ -25,7 +25,11 @@ func NewReplyGenerator(client *Client, cfg config.ModelConfig, soul string) *Rep
 }
 
 func (g *ReplyGenerator) Stream(ctx context.Context, history []Message, text string, onDelta func(string) error) error {
+	// 每次普通对话回复，都会先构造基础消息：
+	// 1. 最前面插入一条 system prompt
+	// 2. 其后拼接最近会话 history
 	messages := g.baseMessages(history)
+	// 当前这轮用户输入始终追加在消息列表最后，作为本次 reply 请求的 user message。
 	messages = append(messages, Message{
 		Role:    "user",
 		Content: strings.TrimSpace(text),
@@ -35,6 +39,8 @@ func (g *ReplyGenerator) Stream(ctx context.Context, history []Message, text str
 }
 
 func (g *ReplyGenerator) StreamToolResult(ctx context.Context, history []Message, userText string, toolName string, toolResult string, onDelta func(string) error) error {
+	// 工具结果总结也沿用同一套基础消息顺序：
+	// system prompt -> history -> 当前这轮工具总结请求。
 	messages := g.baseMessages(history)
 	userPrompt := strings.TrimSpace(fmt.Sprintf(`
 用户刚才的问题是：%s
@@ -66,6 +72,8 @@ func (g *ReplyGenerator) StreamToolResult(ctx context.Context, history []Message
 }
 
 func (g *ReplyGenerator) StreamPendingTaskNotice(ctx context.Context, history []Message, reportContext string, onDelta func(string) error) error {
+	// 异步任务补报同样会把 system prompt 放在最前面，再带上最近历史，
+	// 最后追加“请整理任务进展”的这轮用户提示。
 	messages := g.baseMessages(history)
 	userPrompt := strings.TrimSpace(fmt.Sprintf(`
 系统现在要主动向用户补报异步任务的新进展。
@@ -110,10 +118,13 @@ func (g *ReplyGenerator) baseMessages(history []Message) []Message {
 约束：
 1. 回答要适合语音播报，默认用自然、简洁、口语化中文。
 2. 除非用户明确要求，否则不要使用项目符号、Markdown、代码围栏。
-3. 不要自我介绍规则，不要解释系统提示。
-4. 如果问题本身不需要长答案，保持简短。
+	3. 不要自我介绍规则，不要解释系统提示。
+	4. 如果问题本身不需要长答案，保持简短。
 `), g.soul)
 
+	// 这里把 system prompt 固定插在消息列表最前面。
+	// 之后发给模型的每一轮 reply 请求，都会先看到这条 system message，
+	// 用来约束语气、风格和“小爱外部语音助手”的角色定位。
 	messages := []Message{
 		{
 			Role:    "system",
@@ -121,6 +132,8 @@ func (g *ReplyGenerator) baseMessages(history []Message) []Message {
 		},
 	}
 	if len(history) > 0 {
+		// 最近会话历史紧跟在 system message 后面，
+		// 这样模型先拿到规则，再看到上下文，再看到本轮最新 user 输入。
 		messages = append(messages, history...)
 	}
 	return messages

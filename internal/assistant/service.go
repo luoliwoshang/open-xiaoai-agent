@@ -20,7 +20,23 @@ type xiaoAISession interface {
 	AbortXiaoAI(timeout time.Duration) error
 }
 
+// IntentDecider 负责主流程里的“意图路由判断”。
+//
+// 它的职责不是直接生成给用户播报的最终回复，
+// 而是根据最近会话 history 和当前这轮用户输入 text，
+// 判断这一轮请求应该走哪条处理路径，例如：
+// 1. 直接进入普通聊天 reply；
+// 2. 调用某个同步工具；
+// 3. 受理为异步任务；
+// 4. 命中继续任务、查询进度、取消任务等特殊路由。
+//
+// 返回的 IntentDecision 本质上是一份“主流程决策结果”，
+// assistant.Service 会据此决定后续是走 reply、tool 还是 async task 分支。
 type IntentDecider interface {
+	// Decide 根据上下文和本轮输入做一次意图判定。
+	// ctx 用于限制判定时长并支持取消；
+	// history 是最近会话窗口；
+	// text 是本轮最终 ASR 文本。
 	Decide(ctx context.Context, history []llm.Message, text string) (llm.IntentDecision, error)
 }
 
@@ -116,6 +132,8 @@ func (s *Service) handleASR(session xiaoAISession, text string) {
 	}
 
 	interrupted := false
+	// 如果配置为“ASR 后立即接管”，就先打断原生小爱后续链路，
+	// 避免它继续自己播报或执行，确保后面的回复由当前 Agent 服务统一接管。
 	if s.config.AbortAfterASR {
 		if !s.abort(session) {
 			return
@@ -126,6 +144,9 @@ func (s *Service) handleASR(session xiaoAISession, text string) {
 
 	var speculative *speculativeReply
 	var speculativeCancel context.CancelFunc
+	// 这里提前并行启动一条普通聊天回复：
+	// 如果后面的 intent 结果表明“不需要调工具，只是继续聊天”，
+	// 就可以直接复用这条猜测性回复，减少整轮响应时延。
 	if s.config.UseParallelIntentChat {
 		speculativeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		speculativeCancel = cancel

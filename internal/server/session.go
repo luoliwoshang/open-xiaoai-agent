@@ -51,6 +51,9 @@ func (s *Session) RunShell(script string, timeout time.Duration) (CommandResult,
 	return result, nil
 }
 
+// AbortXiaoAI 通过重启设备侧 mico_aivs_lab 进程来打断原生小爱当前流程。
+// 这里的“abort”不是精细化取消某条指令，而是用一次可预期的重启动作
+// 尽快停掉原生 ASR/TTS 后续链路，把播放控制权交回当前 Agent 服务。
 func (s *Session) AbortXiaoAI(timeout time.Duration) error {
 	result, err := s.RunShell("/etc/init.d/mico_aivs_lab restart >/dev/null 2>&1", timeout)
 	if err != nil {
