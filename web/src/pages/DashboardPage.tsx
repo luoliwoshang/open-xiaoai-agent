@@ -86,9 +86,9 @@ export function DashboardPage({ data, loading, error, setData: _setData }: Props
         className: 'service-pill service-pill-busy',
       }
     }
-    if (data.assistant.pending_report_ready) {
+    if (data.assistant.result_report_ready) {
       return {
-        label: '待补报',
+        label: '结果待汇报',
         className: 'service-pill service-pill-pending',
       }
     }

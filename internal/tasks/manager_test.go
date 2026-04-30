@@ -10,7 +10,7 @@ import (
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/testmysql"
 )
 
-func TestManagerSubmitCompletesAndReports(t *testing.T) {
+func TestManagerSubmitCompletesAndPreparesResultReport(t *testing.T) {
 	t.Helper()
 
 	manager, err := NewManager(testmysql.NewDSN(t), t.TempDir())
@@ -41,14 +41,14 @@ func TestManagerSubmitCompletesAndReports(t *testing.T) {
 	}
 
 	completed := waitForTaskState(t, manager, task.ID, StateCompleted)
-	if !completed.ReportPending {
-		t.Fatal("completed.ReportPending = false, want true")
+	if !completed.ResultReportPending {
+		t.Fatal("completed.ResultReportPending = false, want true")
 	}
 	if completed.Result == "" {
 		t.Fatal("completed.Result = empty, want non-empty")
 	}
 
-	report, ids := manager.BuildPendingReport(3)
+	report, ids := manager.BuildResultReport(3)
 	if !strings.Contains(report, "小游戏网页已经完成了：小游戏网页已经完成，可以开始体验了。") {
 		t.Fatalf("report = %q", report)
 	}
@@ -56,13 +56,13 @@ func TestManagerSubmitCompletesAndReports(t *testing.T) {
 		t.Fatalf("ids = %#v, want [%q]", ids, task.ID)
 	}
 
-	if err := manager.MarkReported(ids); err != nil {
-		t.Fatalf("MarkReported() error = %v", err)
+	if err := manager.MarkResultReported(ids); err != nil {
+		t.Fatalf("MarkResultReported() error = %v", err)
 	}
 
-	report, ids = manager.BuildPendingReport(3)
+	report, ids = manager.BuildResultReport(3)
 	if report != "" || len(ids) != 0 {
-		t.Fatalf("after MarkReported report=%q ids=%#v, want empty", report, ids)
+		t.Fatalf("after MarkResultReported report=%q ids=%#v, want empty", report, ids)
 	}
 }
 
@@ -105,11 +105,11 @@ func TestManagerCancelLatest(t *testing.T) {
 	}
 
 	finalTask := waitForTaskState(t, manager, task.ID, StateCanceled)
-	if !finalTask.ReportPending {
-		t.Fatal("finalTask.ReportPending = false, want true")
+	if !finalTask.ResultReportPending {
+		t.Fatal("finalTask.ResultReportPending = false, want true")
 	}
 
-	report, ids := manager.BuildPendingReport(3)
+	report, ids := manager.BuildResultReport(3)
 	if !strings.Contains(report, "旅行攻略已经取消了：任务已取消") {
 		t.Fatalf("report = %q", report)
 	}

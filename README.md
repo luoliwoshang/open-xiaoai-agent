@@ -74,7 +74,7 @@ flowchart TD
 - 接收 `open-xiaoai` client 通过 WebSocket 转发的最终 ASR 文本
 - 使用 `intent` 模型判断普通聊天、工具调用或异步任务
 - 使用 `reply` 模型流式生成回复，并通过设备侧 TTS 播放
-- 管理轻量异步任务，并在后续对话中补报进度
+- 管理轻量异步任务，并在合适的时候汇报任务结果
 - 提供独立的 React + Vite dashboard
 - 提供后端日志中心，可在管理界面分页查看 Go server 日志
 - 使用 MySQL 保存任务、会话和插件私有状态

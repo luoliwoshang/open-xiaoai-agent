@@ -13,18 +13,18 @@ const (
 )
 
 type Task struct {
-	ID            string    `json:"id"`
-	Plugin        string    `json:"plugin"`
-	Kind          string    `json:"kind"`
-	Title         string    `json:"title"`
-	Input         string    `json:"input"`
-	ParentTaskID  string    `json:"parent_task_id,omitempty"`
-	State         State     `json:"state"`
-	Summary       string    `json:"summary"`
-	Result        string    `json:"result"`
-	ReportPending bool      `json:"report_pending"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID                  string    `json:"id"`
+	Plugin              string    `json:"plugin"`
+	Kind                string    `json:"kind"`
+	Title               string    `json:"title"`
+	Input               string    `json:"input"`
+	ParentTaskID        string    `json:"parent_task_id,omitempty"`
+	State               State     `json:"state"`
+	Summary             string    `json:"summary"`
+	Result              string    `json:"result"`
+	ResultReportPending bool      `json:"result_report_pending"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 type Artifact struct {
@@ -39,7 +39,7 @@ type Artifact struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-type PendingReportItem struct {
+type ResultReportItem struct {
 	ID      string `json:"id"`
 	Title   string `json:"title"`
 	State   State  `json:"state"`

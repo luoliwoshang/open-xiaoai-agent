@@ -319,9 +319,9 @@ func TestHandleStateIncludesAssistantRuntime(t *testing.T) {
 
 	conversations := &fakeConversations{
 		runtime: assistant.RuntimeStatus{
-			Busy:               true,
-			PendingReportReady: true,
-			HasSession:         true,
+			Busy:              true,
+			ResultReportReady: true,
+			HasSession:        true,
 		},
 	}
 	server := New(":0", nil, nil, conversations, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeIM{}, &fakeLogs{})
@@ -343,8 +343,8 @@ func TestHandleStateIncludesAssistantRuntime(t *testing.T) {
 	if !payload.Assistant.Busy {
 		t.Fatal("Assistant.Busy = false, want true")
 	}
-	if !payload.Assistant.PendingReportReady {
-		t.Fatal("Assistant.PendingReportReady = false, want true")
+	if !payload.Assistant.ResultReportReady {
+		t.Fatal("Assistant.ResultReportReady = false, want true")
 	}
 	if !payload.Assistant.HasSession {
 		t.Fatal("Assistant.HasSession = false, want true")

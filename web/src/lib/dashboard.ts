@@ -17,7 +17,7 @@ export const emptyState: DashboardState = {
   conversations: [],
   assistant: {
     busy: false,
-    pending_report_ready: false,
+    result_report_ready: false,
     has_session: false,
   },
   settings: {
@@ -123,7 +123,7 @@ export function normalizeSettings(raw: Partial<SettingsSnapshot> | undefined): S
 function normalizeAssistantRuntime(raw: Partial<AssistantRuntimeStatus> | undefined): AssistantRuntimeStatus {
   return {
     busy: raw?.busy ?? false,
-    pending_report_ready: raw?.pending_report_ready ?? false,
+    result_report_ready: raw?.result_report_ready ?? false,
     has_session: raw?.has_session ?? false,
   }
 }

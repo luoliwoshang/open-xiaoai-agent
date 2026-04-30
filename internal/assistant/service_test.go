@@ -77,14 +77,14 @@ func (fakeReply) StreamToolResult(ctx context.Context, history []llm.Message, us
 	return onDelta("整理后的回复。")
 }
 
-func (fakeReply) StreamPendingTaskNotice(ctx context.Context, history []llm.Message, reportContext string, onDelta func(string) error) error {
-	return onDelta("整理后的任务补报。")
+func (fakeReply) StreamTaskResultReport(ctx context.Context, history []llm.Message, reportContext string, onDelta func(string) error) error {
+	return onDelta("整理后的任务结果汇报。")
 }
 
 type scriptedReply struct {
-	onStream  func(ctx context.Context, history []llm.Message, text string, onDelta func(string) error) error
-	onTool    func(ctx context.Context, history []llm.Message, userText string, toolName string, toolResult string, onDelta func(string) error) error
-	onPending func(ctx context.Context, history []llm.Message, reportContext string, onDelta func(string) error) error
+	onStream       func(ctx context.Context, history []llm.Message, text string, onDelta func(string) error) error
+	onTool         func(ctx context.Context, history []llm.Message, userText string, toolName string, toolResult string, onDelta func(string) error) error
+	onResultReport func(ctx context.Context, history []llm.Message, reportContext string, onDelta func(string) error) error
 }
 
 func (s scriptedReply) Stream(ctx context.Context, history []llm.Message, text string, onDelta func(string) error) error {
@@ -101,9 +101,9 @@ func (s scriptedReply) StreamToolResult(ctx context.Context, history []llm.Messa
 	return nil
 }
 
-func (s scriptedReply) StreamPendingTaskNotice(ctx context.Context, history []llm.Message, reportContext string, onDelta func(string) error) error {
-	if s.onPending != nil {
-		return s.onPending(ctx, history, reportContext, onDelta)
+func (s scriptedReply) StreamTaskResultReport(ctx context.Context, history []llm.Message, reportContext string, onDelta func(string) error) error {
+	if s.onResultReport != nil {
+		return s.onResultReport(ctx, history, reportContext, onDelta)
 	}
 	return nil
 }
@@ -120,11 +120,11 @@ func (f fakeTools) Call(ctx context.Context, name string, arguments json.RawMess
 }
 
 type fakeTaskManager struct {
-	mu            sync.Mutex
-	submittedSpec plugin.AsyncTask
-	pendingItems  []tasks.PendingReportItem
-	pendingIDs    []string
-	markReported  []string
+	mu                  sync.Mutex
+	submittedSpec       plugin.AsyncTask
+	resultReportItems   []tasks.ResultReportItem
+	resultReportIDs     []string
+	markedResultReports []string
 }
 
 func (m *fakeTaskManager) Submit(spec plugin.AsyncTask) (tasks.Task, error) {
@@ -138,24 +138,24 @@ func (m *fakeTaskManager) Submit(spec plugin.AsyncTask) (tasks.Task, error) {
 	}, nil
 }
 
-func (m *fakeTaskManager) PendingReports(limit int) ([]tasks.PendingReportItem, []string) {
+func (m *fakeTaskManager) ListPendingResultReports(limit int) ([]tasks.ResultReportItem, []string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	_ = limit
-	return append([]tasks.PendingReportItem(nil), m.pendingItems...), append([]string(nil), m.pendingIDs...)
+	return append([]tasks.ResultReportItem(nil), m.resultReportItems...), append([]string(nil), m.resultReportIDs...)
 }
 
-func (m *fakeTaskManager) MarkReported(ids []string) error {
+func (m *fakeTaskManager) MarkResultReported(ids []string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.markReported = append([]string(nil), ids...)
+	m.markedResultReports = append([]string(nil), ids...)
 	return nil
 }
 
-func (m *fakeTaskManager) markReportedSnapshot() []string {
+func (m *fakeTaskManager) markedResultReportsSnapshot() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return append([]string(nil), m.markReported...)
+	return append([]string(nil), m.markedResultReports...)
 }
 
 func newTestService(t *testing.T, config Config, intent IntentDecider, reply ReplyStreamer, tools ToolRunner, taskManager TaskManager, spk *speaker.Speaker) *Service {
@@ -336,25 +336,25 @@ func TestHandleASRDoesNotAbortTwiceForToolCall(t *testing.T) {
 	}
 }
 
-func TestDeliverPendingReportsAppendsAssistantHistory(t *testing.T) {
+func TestDeliverTaskResultReportsAppendsAssistantHistory(t *testing.T) {
 	t.Parallel()
 
 	session := &fakeSession{}
 	taskManager := &fakeTaskManager{
-		pendingItems: []tasks.PendingReportItem{{
+		resultReportItems: []tasks.ResultReportItem{{
 			ID:      "task_1",
 			Title:   "刚刚那个任务",
 			State:   tasks.StateCompleted,
 			Summary: "已经创建好了网页文件。",
 			Result:  "网页已经做好了，放在桌面上。",
 		}},
-		pendingIDs: []string{"task_1"},
+		resultReportIDs: []string{"task_1"},
 	}
 	service := newTestService(t,
 		Config{AbortAfterASR: false, PostAbortDelay: 0},
 		fakeIntent{},
 		scriptedReply{
-			onPending: func(ctx context.Context, history []llm.Message, reportContext string, onDelta func(string) error) error {
+			onResultReport: func(ctx context.Context, history []llm.Message, reportContext string, onDelta func(string) error) error {
 				if !strings.Contains(reportContext, "标题：刚刚那个任务") {
 					t.Fatalf("reportContext = %q", reportContext)
 				}
@@ -371,7 +371,7 @@ func TestDeliverPendingReportsAppendsAssistantHistory(t *testing.T) {
 
 	now := time.Now()
 	service.history.AppendTurn(session, now, "你好", "好的")
-	service.deliverPendingReports(session)
+	service.deliverTaskResultReports(session)
 
 	history := service.history.Snapshot(session, time.Now())
 	if len(history) != 3 {
@@ -384,30 +384,30 @@ func TestDeliverPendingReportsAppendsAssistantHistory(t *testing.T) {
 	if last.Content != "对了，刚刚那个网页我已经做好了，放在桌面上了。" {
 		t.Fatalf("last.Content = %q", last.Content)
 	}
-	if len(taskManager.markReported) != 1 || taskManager.markReported[0] != "task_1" {
-		t.Fatalf("markReported = %#v", taskManager.markReported)
+	if len(taskManager.markedResultReports) != 1 || taskManager.markedResultReports[0] != "task_1" {
+		t.Fatalf("markedResultReports = %#v", taskManager.markedResultReports)
 	}
 }
 
-func TestDeliverPendingReportsUsesChunkedPlayback(t *testing.T) {
+func TestDeliverTaskResultReportsUsesChunkedPlayback(t *testing.T) {
 	t.Parallel()
 
 	session := &fakeSession{}
 	taskManager := &fakeTaskManager{
-		pendingItems: []tasks.PendingReportItem{{
+		resultReportItems: []tasks.ResultReportItem{{
 			ID:      "task_1",
 			Title:   "第一个任务",
 			State:   tasks.StateCompleted,
 			Summary: "第一个结果",
 			Result:  "第一个任务已经准备好了。第二句也要一起播。",
 		}},
-		pendingIDs: []string{"task_1"},
+		resultReportIDs: []string{"task_1"},
 	}
 	service := newTestService(t,
 		Config{AbortAfterASR: false, PostAbortDelay: 0},
 		fakeIntent{},
 		scriptedReply{
-			onPending: func(ctx context.Context, history []llm.Message, reportContext string, onDelta func(string) error) error {
+			onResultReport: func(ctx context.Context, history []llm.Message, reportContext string, onDelta func(string) error) error {
 				return onDelta("对了，第一个任务已经准备好了。第二句也要一起播。")
 			},
 		},
@@ -416,7 +416,7 @@ func TestDeliverPendingReportsUsesChunkedPlayback(t *testing.T) {
 		speaker.New(),
 	)
 
-	service.deliverPendingReports(session)
+	service.deliverTaskResultReports(session)
 
 	scripts := session.snapshotScripts()
 	if len(scripts) < 2 {
@@ -424,25 +424,25 @@ func TestDeliverPendingReportsUsesChunkedPlayback(t *testing.T) {
 	}
 }
 
-func TestTryDeliverPendingReportsStartsWhenIdle(t *testing.T) {
+func TestTryDeliverTaskResultReportsStartsWhenIdle(t *testing.T) {
 	t.Parallel()
 
 	session := &fakeSession{}
 	taskManager := &fakeTaskManager{
-		pendingItems: []tasks.PendingReportItem{{
+		resultReportItems: []tasks.ResultReportItem{{
 			ID:      "task_1",
 			Title:   "刚刚那个任务",
 			State:   tasks.StateCompleted,
 			Summary: "已经处理完成。",
 			Result:  "结果已经准备好了。",
 		}},
-		pendingIDs: []string{"task_1"},
+		resultReportIDs: []string{"task_1"},
 	}
 	service := newTestService(t,
 		Config{AbortAfterASR: false, PostAbortDelay: 0},
 		fakeIntent{},
 		scriptedReply{
-			onPending: func(ctx context.Context, history []llm.Message, reportContext string, onDelta func(string) error) error {
+			onResultReport: func(ctx context.Context, history []llm.Message, reportContext string, onDelta func(string) error) error {
 				if !strings.Contains(reportContext, "标题：刚刚那个任务") {
 					t.Fatalf("reportContext = %q", reportContext)
 				}
@@ -455,14 +455,14 @@ func TestTryDeliverPendingReportsStartsWhenIdle(t *testing.T) {
 	)
 
 	service.lastSession = session
-	service.TryDeliverPendingReports()
+	service.TryDeliverTaskResultReports()
 
 	waitUntil(t, time.Second, func() bool {
-		return len(taskManager.markReportedSnapshot()) == 1
+		return len(taskManager.markedResultReportsSnapshot()) == 1
 	})
 
-	if got := taskManager.markReportedSnapshot(); len(got) != 1 || got[0] != "task_1" {
-		t.Fatalf("markReported = %#v", got)
+	if got := taskManager.markedResultReportsSnapshot(); len(got) != 1 || got[0] != "task_1" {
+		t.Fatalf("markedResultReports = %#v", got)
 	}
 	history := service.history.Snapshot(session, time.Now())
 	if len(history) == 0 {
@@ -474,25 +474,25 @@ func TestTryDeliverPendingReportsStartsWhenIdle(t *testing.T) {
 	}
 }
 
-func TestTryDeliverPendingReportsWaitsUntilCurrentTurnFinishes(t *testing.T) {
+func TestTryDeliverTaskResultReportsWaitsUntilCurrentTurnFinishes(t *testing.T) {
 	t.Parallel()
 
 	session := &fakeSession{}
 	taskManager := &fakeTaskManager{
-		pendingItems: []tasks.PendingReportItem{{
+		resultReportItems: []tasks.ResultReportItem{{
 			ID:      "task_1",
 			Title:   "后台任务",
 			State:   tasks.StateCompleted,
 			Summary: "已经完成。",
 			Result:  "最终结果已经准备好了。",
 		}},
-		pendingIDs: []string{"task_1"},
+		resultReportIDs: []string{"task_1"},
 	}
 	service := newTestService(t,
 		Config{AbortAfterASR: false, PostAbortDelay: 0},
 		fakeIntent{},
 		scriptedReply{
-			onPending: func(ctx context.Context, history []llm.Message, reportContext string, onDelta func(string) error) error {
+			onResultReport: func(ctx context.Context, history []llm.Message, reportContext string, onDelta func(string) error) error {
 				return onDelta("对了，后台任务已经完成了。")
 			},
 		},
@@ -504,23 +504,23 @@ func TestTryDeliverPendingReportsWaitsUntilCurrentTurnFinishes(t *testing.T) {
 	service.lastSession = session
 	service.busy = true
 
-	service.TryDeliverPendingReports()
+	service.TryDeliverTaskResultReports()
 
-	if got := taskManager.markReportedSnapshot(); len(got) != 0 {
-		t.Fatalf("markReported before finish = %#v, want empty", got)
+	if got := taskManager.markedResultReportsSnapshot(); len(got) != 0 {
+		t.Fatalf("markedResultReports before finish = %#v, want empty", got)
 	}
-	if !service.pendingReportReady {
-		t.Fatal("pendingReportReady = false, want true")
+	if !service.resultReportReady {
+		t.Fatal("resultReportReady = false, want true")
 	}
 
 	service.finishVoiceTurn()
 
 	waitUntil(t, time.Second, func() bool {
-		return len(taskManager.markReportedSnapshot()) == 1
+		return len(taskManager.markedResultReportsSnapshot()) == 1
 	})
 
-	if got := taskManager.markReportedSnapshot(); len(got) != 1 || got[0] != "task_1" {
-		t.Fatalf("markReported after finish = %#v", got)
+	if got := taskManager.markedResultReportsSnapshot(); len(got) != 1 || got[0] != "task_1" {
+		t.Fatalf("markedResultReports after finish = %#v", got)
 	}
 }
 

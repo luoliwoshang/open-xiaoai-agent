@@ -10,7 +10,7 @@ export type Task = {
   state: TaskState
   summary: string
   result: string
-  report_pending: boolean
+  result_report_pending: boolean
   created_at: string
   updated_at: string
 }
@@ -36,7 +36,7 @@ export type DashboardState = {
 
 export type AssistantRuntimeStatus = {
   busy: boolean
-  pending_report_ready: boolean
+  result_report_ready: boolean
   has_session: boolean
 }
 

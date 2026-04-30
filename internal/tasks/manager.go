@@ -14,13 +14,13 @@ import (
 )
 
 type Manager struct {
-	mu            sync.Mutex
-	store         *Store
-	state         fileState
-	seq           uint64
-	cancels       map[string]context.CancelFunc
-	artifactCache *artifactCache
-	onReportReady func()
+	mu                  sync.Mutex
+	store               *Store
+	state               fileState
+	seq                 uint64
+	cancels             map[string]context.CancelFunc
+	artifactCache       *artifactCache
+	onResultReportReady func()
 }
 
 func NewManager(dsn string, artifactCacheDir string) (*Manager, error) {
@@ -56,17 +56,17 @@ func (m *Manager) Submit(spec plugin.AsyncTask) (Task, error) {
 
 	now := time.Now()
 	task := Task{
-		ID:            m.nextID("task"),
-		Plugin:        strings.TrimSpace(spec.Plugin),
-		Kind:          strings.TrimSpace(spec.Kind),
-		Title:         strings.TrimSpace(spec.Title),
-		Input:         strings.TrimSpace(spec.Input),
-		ParentTaskID:  strings.TrimSpace(spec.ParentTaskID),
-		State:         StateAccepted,
-		Summary:       "任务已受理",
-		ReportPending: false,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		ID:                  m.nextID("task"),
+		Plugin:              strings.TrimSpace(spec.Plugin),
+		Kind:                strings.TrimSpace(spec.Kind),
+		Title:               strings.TrimSpace(spec.Title),
+		Input:               strings.TrimSpace(spec.Input),
+		ParentTaskID:        strings.TrimSpace(spec.ParentTaskID),
+		State:               StateAccepted,
+		Summary:             "任务已受理",
+		ResultReportPending: false,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	}
 	if task.Title == "" {
 		task.Title = task.Kind
@@ -97,12 +97,12 @@ func (m *Manager) Submit(spec plugin.AsyncTask) (Task, error) {
 	return task, nil
 }
 
-// SetPendingReportHook 注册一个轻量回调：当任务刚进入“有待补报结果”的状态时，通知上层去尝试补报。
+// SetResultReportHook 注册一个轻量回调：当任务刚进入“有待汇报结果”的状态时，通知上层去尝试做任务结果汇报。
 // 这不是持续轮询数据库，而是任务状态变化时的一次性事件触发。
-func (m *Manager) SetPendingReportHook(fn func()) {
+func (m *Manager) SetResultReportHook(fn func()) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.onReportReady = fn
+	m.onResultReportReady = fn
 }
 
 func (m *Manager) runTask(ctx context.Context, taskID string, run func(context.Context, plugin.AsyncReporter) (string, error)) {
@@ -128,7 +128,7 @@ func (m *Manager) runTask(ctx context.Context, taskID string, run func(context.C
 			task.State = StateFailed
 			task.Summary = strings.TrimSpace(err.Error())
 			task.Result = ""
-			task.ReportPending = true
+			task.ResultReportPending = true
 			task.UpdatedAt = time.Now()
 			*events = append(*events, Event{
 				ID:        m.nextID("event"),
@@ -139,7 +139,7 @@ func (m *Manager) runTask(ctx context.Context, taskID string, run func(context.C
 			})
 		})
 		m.clearCancel(taskID)
-		m.notifyPendingReportReady()
+		m.notifyResultReportReady()
 		return
 	}
 
@@ -150,7 +150,7 @@ func (m *Manager) runTask(ctx context.Context, taskID string, run func(context.C
 		task.State = StateCompleted
 		task.Result = strings.TrimSpace(result)
 		task.Summary = summarizeResult(task.Result)
-		task.ReportPending = true
+		task.ResultReportPending = true
 		task.UpdatedAt = time.Now()
 		*events = append(*events, Event{
 			ID:        m.nextID("event"),
@@ -161,7 +161,7 @@ func (m *Manager) runTask(ctx context.Context, taskID string, run func(context.C
 		})
 	})
 	m.clearCancel(taskID)
-	m.notifyPendingReportReady()
+	m.notifyResultReportReady()
 }
 
 func (m *Manager) CancelLatest() (*Task, error) {
@@ -174,7 +174,7 @@ func (m *Manager) CancelLatest() (*Task, error) {
 	now := time.Now()
 	task.State = StateCanceled
 	task.Summary = "任务已取消"
-	task.ReportPending = true
+	task.ResultReportPending = true
 	task.UpdatedAt = now
 	m.state.Events = append(m.state.Events, Event{
 		ID:        m.nextID("event"),
@@ -193,7 +193,7 @@ func (m *Manager) CancelLatest() (*Task, error) {
 	}
 	copyTask := *task
 	m.mu.Unlock()
-	m.notifyPendingReportReady()
+	m.notifyResultReportReady()
 	return &copyTask, nil
 }
 
@@ -303,7 +303,7 @@ func formatCompletedTaskForIntent(task Task) string {
 	)
 }
 
-func (m *Manager) BuildPendingReport(limit int) (string, []string) {
+func (m *Manager) BuildResultReport(limit int) (string, []string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -315,17 +315,17 @@ func (m *Manager) BuildPendingReport(limit int) (string, []string) {
 	var ids []string
 	var items []string
 	for _, task := range tasks {
-		if !task.ReportPending {
+		if !task.ResultReportPending {
 			continue
 		}
 		ids = append(ids, task.ID)
 		switch task.State {
 		case StateCompleted:
-			items = append(items, formatPendingItem(task, "已经完成了"))
+			items = append(items, formatResultReportItem(task, "已经完成了"))
 		case StateFailed:
-			items = append(items, formatPendingItem(task, "失败了"))
+			items = append(items, formatResultReportItem(task, "失败了"))
 		case StateCanceled:
-			items = append(items, formatPendingItem(task, "已经取消了"))
+			items = append(items, formatResultReportItem(task, "已经取消了"))
 		}
 		if len(items) >= limit {
 			break
@@ -334,10 +334,10 @@ func (m *Manager) BuildPendingReport(limit int) (string, []string) {
 	if len(items) == 0 {
 		return "", nil
 	}
-	return "对了，刚刚有任务有新进展：" + strings.Join(items, "；") + "。", ids
+	return "对了，刚刚有任务结果可以汇报：" + strings.Join(items, "；") + "。", ids
 }
 
-func (m *Manager) PendingReports(limit int) ([]PendingReportItem, []string) {
+func (m *Manager) ListPendingResultReports(limit int) ([]ResultReportItem, []string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -346,10 +346,10 @@ func (m *Manager) PendingReports(limit int) ([]PendingReportItem, []string) {
 		return tasks[i].UpdatedAt.After(tasks[j].UpdatedAt)
 	})
 
-	items := make([]PendingReportItem, 0, limit)
+	items := make([]ResultReportItem, 0, limit)
 	ids := make([]string, 0, limit)
 	for _, task := range tasks {
-		if !task.ReportPending {
+		if !task.ResultReportPending {
 			continue
 		}
 		switch task.State {
@@ -357,7 +357,7 @@ func (m *Manager) PendingReports(limit int) ([]PendingReportItem, []string) {
 		default:
 			continue
 		}
-		items = append(items, PendingReportItem{
+		items = append(items, ResultReportItem{
 			ID:      task.ID,
 			Title:   strings.TrimSpace(task.Title),
 			State:   task.State,
@@ -372,7 +372,7 @@ func (m *Manager) PendingReports(limit int) ([]PendingReportItem, []string) {
 	return items, ids
 }
 
-func formatPendingItem(task Task, stateText string) string {
+func formatResultReportItem(task Task, stateText string) string {
 	title := strings.TrimSpace(task.Title)
 	summary := strings.TrimSpace(task.Summary)
 	if title == "" {
@@ -401,7 +401,7 @@ func taskStateLabel(state State) string {
 	}
 }
 
-func (m *Manager) MarkReported(ids []string) error {
+func (m *Manager) MarkResultReported(ids []string) error {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -411,7 +411,7 @@ func (m *Manager) MarkReported(ids []string) error {
 	}
 	return m.updateTask("", func(task *Task, events *[]Event) {
 		if _, ok := set[task.ID]; ok {
-			task.ReportPending = false
+			task.ResultReportPending = false
 			task.UpdatedAt = time.Now()
 		}
 		_ = events
@@ -504,9 +504,9 @@ func (m *Manager) clearCancel(taskID string) {
 	delete(m.cancels, taskID)
 }
 
-func (m *Manager) notifyPendingReportReady() {
+func (m *Manager) notifyResultReportReady() {
 	m.mu.Lock()
-	fn := m.onReportReady
+	fn := m.onResultReportReady
 	m.mu.Unlock()
 	if fn == nil {
 		return

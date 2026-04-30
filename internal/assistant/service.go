@@ -44,7 +44,7 @@ type IntentDecider interface {
 type ReplyStreamer interface {
 	Stream(ctx context.Context, history []llm.Message, text string, onDelta func(string) error) error
 	StreamToolResult(ctx context.Context, history []llm.Message, userText string, toolName string, toolResult string, onDelta func(string) error) error
-	StreamPendingTaskNotice(ctx context.Context, history []llm.Message, reportContext string, onDelta func(string) error) error
+	StreamTaskResultReport(ctx context.Context, history []llm.Message, reportContext string, onDelta func(string) error) error
 }
 
 type ToolRunner interface {
@@ -53,8 +53,8 @@ type ToolRunner interface {
 
 type TaskManager interface {
 	Submit(spec plugin.AsyncTask) (tasks.Task, error)
-	PendingReports(limit int) ([]tasks.PendingReportItem, []string)
-	MarkReported(ids []string) error
+	ListPendingResultReports(limit int) ([]tasks.ResultReportItem, []string)
+	MarkResultReported(ids []string) error
 }
 
 type MirrorSender interface {
@@ -78,22 +78,22 @@ type Service struct {
 	spk     *speaker.Speaker
 	history *historyStore
 
-	runtimeMu          sync.Mutex
-	busy               bool
-	lastSession        xiaoAISession
-	pendingReportReady bool
+	runtimeMu         sync.Mutex
+	busy              bool
+	lastSession       xiaoAISession
+	resultReportReady bool
 }
 
 // RuntimeStatus 是主语音通道的只读运行时快照。
 //
 // 这份状态主要给 dashboard 和排障使用，用来回答：
 // 1. 当前是否还有一轮会发声的主流程正在执行；
-// 2. 当前是否有任务结果已经 ready，但因为语音通道忙而暂时没补报；
+// 2. 当前是否有任务结果已经 ready，但因为语音通道忙而暂时还没做结果汇报；
 // 3. 当前是否已经拿到一个可用于主动播报的最近 session。
 type RuntimeStatus struct {
-	Busy               bool `json:"busy"`
-	PendingReportReady bool `json:"pending_report_ready"`
-	HasSession         bool `json:"has_session"`
+	Busy              bool `json:"busy"`
+	ResultReportReady bool `json:"result_report_ready"`
+	HasSession        bool `json:"has_session"`
 }
 
 func New(config Config, sessionSettings sessionWindowProvider, intent IntentDecider, reply ReplyStreamer, tools ToolRunner, taskManager TaskManager, mirror MirrorSender, spk *speaker.Speaker) (*Service, error) {
@@ -140,9 +140,9 @@ func (s *Service) RuntimeStatus() RuntimeStatus {
 	defer s.runtimeMu.Unlock()
 
 	return RuntimeStatus{
-		Busy:               s.busy,
-		PendingReportReady: s.pendingReportReady,
-		HasSession:         s.lastSession != nil,
+		Busy:              s.busy,
+		ResultReportReady: s.resultReportReady,
+		HasSession:        s.lastSession != nil,
 	}
 }
 
@@ -160,17 +160,17 @@ func (s *Service) OnASR(session *server.Session, text string) {
 	}()
 }
 
-// TryDeliverPendingReports 在任务系统通知“有待补报结果”时被调用。
-// 如果当前语音通道空闲，就主动补报；如果当前仍在处理别的语音主流程，就先挂起，等本轮结束后再补报。
-func (s *Service) TryDeliverPendingReports() {
-	session, ok := s.tryBeginPendingReportTurn()
+// TryDeliverTaskResultReports 在任务系统通知“有待汇报结果”时被调用。
+// 如果当前语音通道空闲，就主动做任务结果汇报；如果当前仍在处理别的语音主流程，就先挂起，等本轮结束后再汇报。
+func (s *Service) TryDeliverTaskResultReports() {
+	session, ok := s.tryBeginResultReportTurn()
 	if !ok {
 		return
 	}
 
 	go func() {
 		defer s.finishVoiceTurn()
-		s.deliverPendingReports(session)
+		s.deliverTaskResultReports(session)
 	}()
 }
 
@@ -180,18 +180,18 @@ func (s *Service) handleASR(session xiaoAISession, text string) {
 		return
 	}
 	// 这不是“本轮是否处理成功”的标记，而是：
-	// 当前这轮返回前，是否适合顺手补播 pending task report。
+	// 当前这轮返回前，是否适合顺手做任务结果汇报。
 	//
 	// 例如：
-	// - 普通 reply / tool reply / async accept 成功播出后 => 适合补播；
-	// - 工具执行失败、当前回复根本没播出来 => 不适合补播，
-	//   否则用户可能听到一条和当前问题完全无关的任务补报。
-	shouldDeliverPendingReports := false
+	// - 普通 reply / tool reply / async accept 成功播出后 => 适合顺手汇报任务结果；
+	// - 工具执行失败、当前回复根本没播出来 => 不适合汇报，
+	//   否则用户可能听到一条和当前问题完全无关的任务结果汇报。
+	shouldDeliverResultReports := false
 	defer func() {
-		if !shouldDeliverPendingReports {
+		if !shouldDeliverResultReports {
 			return
 		}
-		s.deliverPendingReports(session)
+		s.deliverTaskResultReports(session)
 	}()
 
 	now := time.Now()
@@ -267,7 +267,7 @@ func (s *Service) handleASR(session xiaoAISession, text string) {
 			if speculative != nil {
 				speculative.Cancel()
 			}
-			shouldDeliverPendingReports = s.handleToolCall(session, history, now, text, *decision.ToolCall, interrupted, decision.ShouldAbort, metrics)
+			shouldDeliverResultReports = s.handleToolCall(session, history, now, text, *decision.ToolCall, interrupted, decision.ShouldAbort, metrics)
 			return
 		}
 	}
@@ -319,7 +319,7 @@ func (s *Service) handleASR(session xiaoAISession, text string) {
 
 	s.history.AppendTurn(session, now, text, strings.TrimSpace(replyText.String()))
 	s.mirrorReply(replyText.String())
-	shouldDeliverPendingReports = true
+	shouldDeliverResultReports = true
 	metrics.LogCompleted("reply playback")
 }
 
@@ -329,12 +329,12 @@ func (s *Service) handleASR(session xiaoAISession, text string) {
 // - continue_chat 会回到普通 reply 主线；
 // - handleToolCall 只处理那些真的要执行工具/任务的调用。
 //
-// 返回值表示：handleASR 收尾阶段是否应该顺手补播 pending task report。
+// 返回值表示：handleASR 收尾阶段是否应该顺手做任务结果汇报。
 // 当前实现里，通常只有“当前这轮已经成功播出一段主回复”时才返回 true。
 //
 // 当前工具执行完后会按 OutputMode 分成 3 类：
 //  1. async_accept
-//     工具本身只是受理一个异步任务，马上播报“我先去处理”，后续结果延迟补报；
+//     工具本身只是受理一个异步任务，马上播报“我先去处理”，后续结果延迟汇报；
 //  2. direct
 //     工具返回的文本可以直接播，不需要再过 reply 模型包装；
 //  3. 默认模式
@@ -375,7 +375,7 @@ func (s *Service) handleToolCall(session xiaoAISession, history []llm.Message, t
 
 	// async_accept 表示工具并不在当前这轮里直接给最终结果，
 	// 而是先受理成一个后台任务；当前只播报“收到，我先处理”，
-	// 真正完成后的结果会走 pending report 机制在后续时机补报。
+	// 真正完成后的结果会走“任务结果汇报”机制在后续时机继续汇报。
 	if result.NormalizedOutputMode() == plugin.OutputModeAsyncAccept {
 		return s.handleAsyncTask(session, turnStartedAt, userText, call, result, metrics)
 	}
@@ -441,9 +441,9 @@ func (s *Service) handleToolCall(session xiaoAISession, history []llm.Message, t
 // 也就是说：
 // - 这里处理的是“任务受理”；
 // - 真正完成后的结果不会在这里播报；
-// - 完成结果会在后台任务结束后，走 pending report 机制延迟补报。
+// - 完成结果会在后台任务结束后，走“任务结果汇报”机制延迟汇报。
 //
-// 返回值表示：handleASR 收尾阶段是否应该顺手补播 pending task report。
+// 返回值表示：handleASR 收尾阶段是否应该顺手做任务结果汇报。
 // 当前实现里，受理文案成功播出后才返回 true。
 func (s *Service) handleAsyncTask(session xiaoAISession, turnStartedAt time.Time, userText string, call llm.ToolCall, result plugin.Result, metrics *turnMetrics) bool {
 	if s.tasks == nil {
@@ -535,18 +535,18 @@ func (s *Service) tryBeginVoiceTurn(session xiaoAISession) bool {
 	return true
 }
 
-func (s *Service) tryBeginPendingReportTurn() (xiaoAISession, bool) {
+func (s *Service) tryBeginResultReportTurn() (xiaoAISession, bool) {
 	s.runtimeMu.Lock()
 	defer s.runtimeMu.Unlock()
 
-	s.pendingReportReady = true
+	s.resultReportReady = true
 	if s.busy || s.lastSession == nil {
 		return nil, false
 	}
 
 	session := s.lastSession
 	s.busy = true
-	s.pendingReportReady = false
+	s.resultReportReady = false
 	return session, true
 }
 
@@ -556,10 +556,10 @@ func (s *Service) finishVoiceTurn() {
 
 	s.runtimeMu.Lock()
 	s.busy = false
-	if s.pendingReportReady && s.lastSession != nil {
+	if s.resultReportReady && s.lastSession != nil {
 		session = s.lastSession
 		s.busy = true
-		s.pendingReportReady = false
+		s.resultReportReady = false
 		startPending = true
 	}
 	s.runtimeMu.Unlock()
@@ -570,7 +570,7 @@ func (s *Service) finishVoiceTurn() {
 
 	go func() {
 		defer s.finishVoiceTurn()
-		s.deliverPendingReports(session)
+		s.deliverTaskResultReports(session)
 	}()
 }
 
@@ -595,16 +595,16 @@ func (s *Service) preparePlayback(session xiaoAISession, interrupted bool, shoul
 	return true
 }
 
-func (s *Service) deliverPendingReports(session xiaoAISession) {
+func (s *Service) deliverTaskResultReports(session xiaoAISession) {
 	if s.tasks == nil {
 		return
 	}
-	items, ids := s.tasks.PendingReports(3)
+	items, ids := s.tasks.ListPendingResultReports(3)
 	if len(items) == 0 || len(ids) == 0 {
 		return
 	}
 
-	reportContext := buildPendingTaskNoticeContext(items)
+	reportContext := buildTaskResultReportContext(items)
 	history := s.history.Snapshot(session, time.Now())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -612,28 +612,28 @@ func (s *Service) deliverPendingReports(session xiaoAISession) {
 
 	player := speaker.NewStreamPlayer(s.spk, session, 30*time.Second, 100*time.Millisecond)
 	var replyText strings.Builder
-	if err := s.reply.StreamPendingTaskNotice(ctx, history, reportContext, func(delta string) error {
+	if err := s.reply.StreamTaskResultReport(ctx, history, reportContext, func(delta string) error {
 		replyText.WriteString(delta)
 		return player.Push(delta)
 	}); err != nil {
-		log.Printf("pending task notice model failed: %v", err)
+		log.Printf("task result report model failed: %v", err)
 		return
 	}
 	if err := player.Close(); err != nil {
-		log.Printf("pending task report playback failed: %v", err)
+		log.Printf("task result report playback failed: %v", err)
 		return
 	}
 
 	finalReply := strings.TrimSpace(replyText.String())
 	if finalReply == "" {
-		log.Printf("pending task notice returned empty text")
+		log.Printf("task result report returned empty text")
 		return
 	}
 
 	s.history.AppendTurn(session, time.Now(), "", finalReply)
 	s.mirrorReply(finalReply)
-	if err := s.tasks.MarkReported(ids); err != nil {
-		log.Printf("mark pending task report failed: %v", err)
+	if err := s.tasks.MarkResultReported(ids); err != nil {
+		log.Printf("mark task result report failed: %v", err)
 	}
 }
 
@@ -648,9 +648,9 @@ func (s *Service) mirrorReply(text string) {
 	s.mirror.MirrorText(text)
 }
 
-func buildPendingTaskNoticeContext(items []tasks.PendingReportItem) string {
+func buildTaskResultReportContext(items []tasks.ResultReportItem) string {
 	var b strings.Builder
-	b.WriteString("最近有异步任务需要主动补报，任务信息如下：\n")
+	b.WriteString("最近有异步任务结果需要主动汇报，任务信息如下：\n")
 	for index, item := range items {
 		fmt.Fprintf(&b, "%d. 标题：%s\n", index+1, fallbackTaskNoticeValue(item.Title, "未命名任务"))
 		fmt.Fprintf(&b, "   状态：%s\n", taskNoticeStateLabel(item.State))

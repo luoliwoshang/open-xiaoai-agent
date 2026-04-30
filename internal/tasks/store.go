@@ -27,7 +27,7 @@ func (s *Store) Load() (fileState, error) {
 	state := fileState{Version: 1}
 
 	taskRows, err := s.db.Query(`
-		SELECT id, plugin, kind, title, input, parent_task_id, state, summary, result, report_pending, created_at, updated_at
+		SELECT id, plugin, kind, title, input, parent_task_id, state, summary, result, result_report_pending, created_at, updated_at
 		FROM tasks
 	`)
 	if err != nil {
@@ -37,7 +37,7 @@ func (s *Store) Load() (fileState, error) {
 
 	for taskRows.Next() {
 		var task Task
-		var reportPending bool
+		var resultReportPending bool
 		var createdAt, updatedAt int64
 		if err := taskRows.Scan(
 			&task.ID,
@@ -49,13 +49,13 @@ func (s *Store) Load() (fileState, error) {
 			&task.State,
 			&task.Summary,
 			&task.Result,
-			&reportPending,
+			&resultReportPending,
 			&createdAt,
 			&updatedAt,
 		); err != nil {
 			return fileState{}, fmt.Errorf("scan task row: %w", err)
 		}
-		task.ReportPending = reportPending
+		task.ResultReportPending = resultReportPending
 		task.CreatedAt = storage.TimeFromUnixMillis(createdAt)
 		task.UpdatedAt = storage.TimeFromUnixMillis(updatedAt)
 		state.Tasks = append(state.Tasks, task)
@@ -149,7 +149,7 @@ func (s *Store) Save(state fileState) error {
 	}
 
 	taskStmt, err := tx.Prepare(`
-		INSERT INTO tasks (id, plugin, kind, title, input, parent_task_id, state, summary, result, report_pending, created_at, updated_at)
+		INSERT INTO tasks (id, plugin, kind, title, input, parent_task_id, state, summary, result, result_report_pending, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
@@ -168,7 +168,7 @@ func (s *Store) Save(state fileState) error {
 			string(task.State),
 			task.Summary,
 			task.Result,
-			task.ReportPending,
+			task.ResultReportPending,
 			storage.UnixMillis(task.CreatedAt),
 			storage.UnixMillis(task.UpdatedAt),
 		); err != nil {

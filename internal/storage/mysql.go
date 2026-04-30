@@ -98,7 +98,7 @@ func ensureSchema(db *sql.DB) error {
 			state VARCHAR(64) NOT NULL,
 			summary LONGTEXT NOT NULL,
 			result LONGTEXT NOT NULL,
-			report_pending BOOLEAN NOT NULL DEFAULT FALSE,
+			result_report_pending BOOLEAN NOT NULL DEFAULT FALSE,
 			created_at BIGINT NOT NULL,
 			updated_at BIGINT NOT NULL
 		)`,

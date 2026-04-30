@@ -66,10 +66,10 @@ export function TaskListPane({ tasks, selectedTaskID, onSelect }: Props) {
                   </div>
                   <div className="task-teaser-side">
                     <StatusBadge state={task.state} />
-                    {task.report_pending ? (
+                    {task.result_report_pending ? (
                       <span className="soft-chip">
                         <Sparkles size={14} />
-                        待补报
+                        待汇报
                       </span>
                     ) : null}
                   </div>
