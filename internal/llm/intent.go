@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/config"
@@ -33,6 +34,15 @@ type IntentRecognizer struct {
 	taskContext CompletedTasksProvider
 }
 
+// ToolDefinitionsProvider 提供“当前已经注册的工具定义列表”。
+//
+// 注意这里拿到的是给 LLM 做路由判断用的工具元数据，
+// 例如 name / description / input schema，
+// 不是工具真正执行时的 handler 函数本身。
+//
+// 当前主流程里通常会把 plugin.Registry 注入进来；
+// registry 会把所有已注册工具转换成 []llm.ToolDefinition，
+// 再交给 intent 模型作为可调用工具集合。
 type ToolDefinitionsProvider interface {
 	Definitions() []ToolDefinition
 }
@@ -50,9 +60,31 @@ func NewIntentRecognizer(client *Client, cfg config.ModelConfig, tools ToolDefin
 	}
 }
 
+// Decide 对当前这轮用户输入做一次“主流程路由判定”。
+//
+// 它不会直接生成最终播报给用户的回复，而是把当前 text、最近会话 history、
+// 可用工具定义以及最近已完成任务摘要一起发给 intent 模型，让模型判断：
+// 1. 这轮是否应该继续走普通聊天 reply；
+// 2. 是否应该命中某个同步工具；
+// 3. 是否应该受理为 complex_task / continue_task / query_task_progress 等特殊工具调用。
+//
+// 返回值兼容两种模型行为：
+// 1. 模型直接按 OpenAI tool call 机制返回工具调用；
+// 2. 模型没有稳定返回 tool call，而是退化成固定 JSON，由这里再还原成 IntentDecision。
+//
+// assistant.Service 会消费这份 IntentDecision，
+// 决定主流程后续进入 reply、tool 还是 async task 分支。
 func (r *IntentRecognizer) Decide(ctx context.Context, history []Message, text string) (IntentDecision, error) {
 	availableTools := []ToolDefinition(nil)
 	if r.tools != nil {
+		// 这里取到的是“当前系统里已经注册好的工具定义”。
+		// 它们通常来自 plugin.Registry.Definitions()：
+		// registry 先在启动阶段注册 weather / stock / complex_task / continue_task 等工具，
+		// 这里再把这些工具的 name / description / input schema 提供给 intent 模型。
+		//
+		// 也就是说：
+		// 1. 注册阶段保存的是完整工具（定义 + handler）；
+		// 2. 到 intent 阶段这里只取“定义”，不给模型暴露 Go 里的真实执行函数。
 		availableTools = r.tools.Definitions()
 	}
 
@@ -119,6 +151,9 @@ func (r *IntentRecognizer) Decide(ctx context.Context, history []Message, text s
 		messages = append(prefix, append(history, currentUser)...)
 	}
 
+	// 这里把已注册工具定义一并传给模型：
+	// 如果模型稳定支持 OpenAI tool call，就可能直接返回某个 tool call；
+	// 否则会退化成普通文本 / JSON，再由下面的逻辑继续解析。
 	result, err := r.client.CompleteWithTools(ctx, r.config, messages, 0, availableTools)
 	if err != nil {
 		return IntentDecision{}, err
@@ -126,6 +161,7 @@ func (r *IntentRecognizer) Decide(ctx context.Context, history []Message, text s
 
 	if len(result.ToolCalls) > 0 {
 		call := result.ToolCalls[0]
+		log.Printf("intent tool selected via native tool_call: tool=%s", strings.TrimSpace(call.Name))
 		return IntentDecision{
 			ShouldHandle:  true,
 			ShouldAbort:   true,
@@ -158,6 +194,7 @@ func (r *IntentRecognizer) Decide(ctx context.Context, history []Message, text s
 		if len(arguments) == 0 {
 			arguments = json.RawMessage(`{}`)
 		}
+		log.Printf("intent tool selected via json fallback: tool=%s", strings.TrimSpace(toolName))
 		decision.ToolCall = &ToolCall{
 			Name:      toolName,
 			Arguments: arguments,
