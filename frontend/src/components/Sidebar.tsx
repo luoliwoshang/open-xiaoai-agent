@@ -1,0 +1,52 @@
+import { LayoutDashboard, FileText, Settings } from 'lucide-react'
+import type { AssistantRuntimeStatus } from '../../types'
+
+interface SidebarProps {
+  page: string
+  assistant: AssistantRuntimeStatus
+}
+
+export function Sidebar({ page, assistant }: SidebarProps) {
+  const navItems = [
+    { id: 'dashboard', label: '仪表盘', icon: LayoutDashboard },
+    { id: 'logs', label: '日志', icon: FileText },
+    { id: 'settings', label: '设置', icon: Settings },
+  ]
+
+  return (
+    <aside className="sidebar">
+      <div className="sidebar-brand">
+        <h1>XiaoAi Agent</h1>
+        <div className="sidebar-brand-sub">dashboard</div>
+      </div>
+      <nav className="sidebar-nav">
+        {navItems.map((item) => (
+          <a
+            key={item.id}
+            href={`#/${item.id === 'dashboard' ? '' : item.id}`}
+            className={`nav-item ${page === item.id ? 'active' : ''}`}
+          >
+            <item.icon />
+            {item.label}
+          </a>
+        ))}
+      </nav>
+      <div className="sidebar-status">
+        <div className="status-row">
+          <span className={`status-dot ${assistant.has_session ? 'green' : 'gray'}`} />
+          <span>{assistant.has_session ? '会话在线' : '无会话'}</span>
+        </div>
+        <div className="status-row">
+          <span className={`status-dot ${assistant.busy ? 'yellow' : 'green'}`} />
+          <span>{assistant.busy ? '执行中' : '空闲'}</span>
+        </div>
+        {assistant.result_report_ready && (
+          <div className="status-row">
+            <span className="status-dot blue" />
+            <span>报告待推送</span>
+          </div>
+        )}
+      </div>
+    </aside>
+  )
+}

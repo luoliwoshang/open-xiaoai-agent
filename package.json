@@ -2,7 +2,8 @@
   "name": "open-xiaoai-agent",
   "private": true,
   "workspaces": [
-    "web"
+    "web",
+    "frontend"
   ],
   "scripts": {
     "db:up": "docker compose up -d mysql",
@@ -10,6 +11,8 @@
     "db:logs": "docker compose logs -f mysql",
     "db:ps": "docker compose ps",
     "dev": "concurrently -k -n go,web -c cyan,magenta \"npm:dev:go\" \"npm:dev:web\"",
+    "dev:fe": "npm run dev --workspace frontend -- --host 0.0.0.0",
+    "build:fe": "npm run build --workspace frontend",
     "dev:go": "go run .",
     "dev:web": "npm run dev --workspace web -- --host 0.0.0.0",
     "build:web": "npm run build --workspace web",
