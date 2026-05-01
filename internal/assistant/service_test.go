@@ -11,44 +11,48 @@ import (
 
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/llm"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugin"
-	"github.com/luoliwoshang/open-xiaoai-agent/internal/server"
-	"github.com/luoliwoshang/open-xiaoai-agent/internal/speaker"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/tasks"
+	"github.com/luoliwoshang/open-xiaoai-agent/internal/voice"
 )
 
-type fakeSession struct {
-	mu         sync.Mutex
-	order      []string
-	scripts    []string
-	abortErr   error
-	abortCalls int
+const testHistoryKey = "session-test"
+
+type fakeChannel struct {
+	mu           sync.Mutex
+	order        []string
+	scripts      []string
+	prepareErr   error
+	prepareCalls int
 }
 
-func (s *fakeSession) AbortXiaoAI(timeout time.Duration) error {
+func (s *fakeChannel) PreparePlayback(opts voice.PlaybackOptions) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.abortCalls++
-	s.order = append(s.order, "abort")
-	return s.abortErr
+	if !opts.NativeFlowInterrupted && opts.InterruptNativeFlow {
+		s.prepareCalls++
+		s.order = append(s.order, "prepare")
+		return s.prepareErr
+	}
+	return nil
 }
 
-func (s *fakeSession) RunShell(script string, timeout time.Duration) (server.CommandResult, error) {
+func (s *fakeChannel) SpeakText(text string, timeout time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.order = append(s.order, "run_shell")
-	s.scripts = append(s.scripts, script)
-	return server.CommandResult{ExitCode: 0}, nil
+	s.order = append(s.order, "speak")
+	s.scripts = append(s.scripts, text)
+	return nil
 }
 
-func (s *fakeSession) snapshot() ([]string, int) {
+func (s *fakeChannel) snapshot() ([]string, int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	order := make([]string, len(s.order))
 	copy(order, s.order)
-	return order, s.abortCalls
+	return order, s.prepareCalls
 }
 
-func (s *fakeSession) snapshotScripts() []string {
+func (s *fakeChannel) snapshotScripts() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	scripts := make([]string, len(s.scripts))
@@ -158,10 +162,10 @@ func (m *fakeTaskManager) markedResultReportsSnapshot() []string {
 	return append([]string(nil), m.markedResultReports...)
 }
 
-func newTestService(t *testing.T, config Config, intent IntentDecider, reply ReplyStreamer, tools ToolRunner, taskManager TaskManager, spk *speaker.Speaker) *Service {
+func newTestService(t *testing.T, config Config, intent IntentDecider, reply ReplyStreamer, tools ToolRunner, taskManager TaskManager) *Service {
 	t.Helper()
 
-	service, err := New(config, staticSessionWindow{window: 5 * time.Minute}, intent, reply, tools, taskManager, nil, spk)
+	service, err := New(config, staticSessionWindow{window: 5 * time.Minute}, intent, reply, tools, taskManager, nil)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -181,10 +185,10 @@ func waitUntil(t *testing.T, timeout time.Duration, fn func() bool) {
 	t.Fatal("condition not satisfied before timeout")
 }
 
-func TestHandleASRAbortsBeforeIntent(t *testing.T) {
+func TestHandleUserTextPreparesPlaybackBeforeIntent(t *testing.T) {
 	t.Parallel()
 
-	session := &fakeSession{}
+	session := &fakeChannel{}
 	var mu sync.Mutex
 	var order []string
 
@@ -203,17 +207,16 @@ func TestHandleASRAbortsBeforeIntent(t *testing.T) {
 		fakeReply{},
 		fakeTools{},
 		&fakeTaskManager{},
-		speaker.New(),
 	)
 
-	service.handleASR(session, "你是谁")
+	service.handleUserText(testHistoryKey, session, "你是谁")
 
 	sessionOrder, abortCalls := session.snapshot()
 	if abortCalls != 1 {
 		t.Fatalf("abortCalls = %d, want 1", abortCalls)
 	}
-	if len(sessionOrder) == 0 || sessionOrder[0] != "abort" {
-		t.Fatalf("sessionOrder = %#v, want first step abort", sessionOrder)
+	if len(sessionOrder) == 0 || sessionOrder[0] != "prepare" {
+		t.Fatalf("sessionOrder = %#v, want first step prepare", sessionOrder)
 	}
 
 	mu.Lock()
@@ -223,10 +226,10 @@ func TestHandleASRAbortsBeforeIntent(t *testing.T) {
 	}
 }
 
-func TestHandleASRStopsWhenImmediateAbortFails(t *testing.T) {
+func TestHandleUserTextStopsWhenInitialPlaybackPreparationFails(t *testing.T) {
 	t.Parallel()
 
-	session := &fakeSession{abortErr: errors.New("boom")}
+	session := &fakeChannel{prepareErr: errors.New("boom")}
 	intentCalled := false
 
 	service := newTestService(t,
@@ -242,17 +245,16 @@ func TestHandleASRStopsWhenImmediateAbortFails(t *testing.T) {
 		fakeReply{},
 		fakeTools{},
 		&fakeTaskManager{},
-		speaker.New(),
 	)
 
-	service.handleASR(session, "你是谁")
+	service.handleUserText(testHistoryKey, session, "你是谁")
 
 	if intentCalled {
 		t.Fatal("intentCalled = true, want false")
 	}
 }
 
-func TestOnASRIgnoresNewInputWhileBusy(t *testing.T) {
+func TestHandleUserTextIgnoresNewInputWhileBusy(t *testing.T) {
 	t.Parallel()
 
 	intentCalled := false
@@ -267,11 +269,10 @@ func TestOnASRIgnoresNewInputWhileBusy(t *testing.T) {
 		fakeReply{},
 		fakeTools{},
 		&fakeTaskManager{},
-		speaker.New(),
 	)
 
 	service.busy = true
-	service.OnASR(nil, "这句应该被忽略")
+	service.HandleUserText("", nil, "这句应该被忽略")
 	time.Sleep(50 * time.Millisecond)
 
 	if intentCalled {
@@ -282,10 +283,10 @@ func TestOnASRIgnoresNewInputWhileBusy(t *testing.T) {
 	}
 }
 
-func TestHandleASRDoesNotAbortTwiceForToolCall(t *testing.T) {
+func TestHandleUserTextDoesNotPrepareTwiceForToolCall(t *testing.T) {
 	t.Parallel()
 
-	session := &fakeSession{}
+	session := &fakeChannel{}
 	toolReplyCalled := false
 	taskManager := &fakeTaskManager{}
 	service := newTestService(t,
@@ -322,10 +323,9 @@ func TestHandleASRDoesNotAbortTwiceForToolCall(t *testing.T) {
 			},
 		},
 		taskManager,
-		speaker.New(),
 	)
 
-	service.handleASR(session, "上海天气怎么样")
+	service.handleUserText(testHistoryKey, session, "上海天气怎么样")
 
 	_, abortCalls := session.snapshot()
 	if abortCalls != 1 {
@@ -339,7 +339,7 @@ func TestHandleASRDoesNotAbortTwiceForToolCall(t *testing.T) {
 func TestDeliverTaskResultReportsAppendsAssistantHistory(t *testing.T) {
 	t.Parallel()
 
-	session := &fakeSession{}
+	session := &fakeChannel{}
 	taskManager := &fakeTaskManager{
 		resultReportItems: []tasks.ResultReportItem{{
 			ID:      "task_1",
@@ -366,14 +366,13 @@ func TestDeliverTaskResultReportsAppendsAssistantHistory(t *testing.T) {
 		},
 		fakeTools{},
 		taskManager,
-		speaker.New(),
 	)
 
 	now := time.Now()
-	service.history.AppendTurn(session, now, "你好", "好的")
-	service.deliverTaskResultReports(session)
+	service.history.AppendTurn(historyRef(testHistoryKey), now, "你好", "好的")
+	service.deliverTaskResultReports(testHistoryKey, session)
 
-	history := service.history.Snapshot(session, time.Now())
+	history := service.history.Snapshot(historyRef(testHistoryKey), time.Now())
 	if len(history) != 3 {
 		t.Fatalf("len(history) = %d, want 3", len(history))
 	}
@@ -392,7 +391,7 @@ func TestDeliverTaskResultReportsAppendsAssistantHistory(t *testing.T) {
 func TestDeliverTaskResultReportsUsesChunkedPlayback(t *testing.T) {
 	t.Parallel()
 
-	session := &fakeSession{}
+	session := &fakeChannel{}
 	taskManager := &fakeTaskManager{
 		resultReportItems: []tasks.ResultReportItem{{
 			ID:      "task_1",
@@ -413,10 +412,9 @@ func TestDeliverTaskResultReportsUsesChunkedPlayback(t *testing.T) {
 		},
 		fakeTools{},
 		taskManager,
-		speaker.New(),
 	)
 
-	service.deliverTaskResultReports(session)
+	service.deliverTaskResultReports(testHistoryKey, session)
 
 	scripts := session.snapshotScripts()
 	if len(scripts) < 2 {
@@ -427,7 +425,7 @@ func TestDeliverTaskResultReportsUsesChunkedPlayback(t *testing.T) {
 func TestTryDeliverTaskResultReportsStartsWhenIdle(t *testing.T) {
 	t.Parallel()
 
-	session := &fakeSession{}
+	session := &fakeChannel{}
 	taskManager := &fakeTaskManager{
 		resultReportItems: []tasks.ResultReportItem{{
 			ID:      "task_1",
@@ -451,10 +449,10 @@ func TestTryDeliverTaskResultReportsStartsWhenIdle(t *testing.T) {
 		},
 		fakeTools{},
 		taskManager,
-		speaker.New(),
 	)
 
-	service.lastSession = session
+	service.lastChannel = session
+	service.lastHistoryKey = testHistoryKey
 	service.TryDeliverTaskResultReports()
 
 	waitUntil(t, time.Second, func() bool {
@@ -464,7 +462,7 @@ func TestTryDeliverTaskResultReportsStartsWhenIdle(t *testing.T) {
 	if got := taskManager.markedResultReportsSnapshot(); len(got) != 1 || got[0] != "task_1" {
 		t.Fatalf("markedResultReports = %#v", got)
 	}
-	history := service.history.Snapshot(session, time.Now())
+	history := service.history.Snapshot(historyRef(testHistoryKey), time.Now())
 	if len(history) == 0 {
 		t.Fatal("history is empty")
 	}
@@ -477,7 +475,7 @@ func TestTryDeliverTaskResultReportsStartsWhenIdle(t *testing.T) {
 func TestTryDeliverTaskResultReportsWaitsUntilCurrentTurnFinishes(t *testing.T) {
 	t.Parallel()
 
-	session := &fakeSession{}
+	session := &fakeChannel{}
 	taskManager := &fakeTaskManager{
 		resultReportItems: []tasks.ResultReportItem{{
 			ID:      "task_1",
@@ -498,10 +496,10 @@ func TestTryDeliverTaskResultReportsWaitsUntilCurrentTurnFinishes(t *testing.T) 
 		},
 		fakeTools{},
 		taskManager,
-		speaker.New(),
 	)
 
-	service.lastSession = session
+	service.lastChannel = session
+	service.lastHistoryKey = testHistoryKey
 	service.busy = true
 
 	service.TryDeliverTaskResultReports()
@@ -524,10 +522,10 @@ func TestTryDeliverTaskResultReportsWaitsUntilCurrentTurnFinishes(t *testing.T) 
 	}
 }
 
-func TestHandleASRCanDirectReplyForToolCall(t *testing.T) {
+func TestHandleUserTextCanDirectReplyForToolCall(t *testing.T) {
 	t.Parallel()
 
-	session := &fakeSession{}
+	session := &fakeChannel{}
 	toolReplyCalled := false
 	service := newTestService(t,
 		Config{AbortAfterASR: true, PostAbortDelay: 0},
@@ -555,20 +553,19 @@ func TestHandleASRCanDirectReplyForToolCall(t *testing.T) {
 			},
 		},
 		&fakeTaskManager{},
-		speaker.New(),
 	)
 
-	service.handleASR(session, "上海天气怎么样")
+	service.handleUserText(testHistoryKey, session, "上海天气怎么样")
 
 	if toolReplyCalled {
 		t.Fatal("toolReplyCalled = true, want false")
 	}
 }
 
-func TestHandleASRRoutesContinueChatToolToReply(t *testing.T) {
+func TestHandleUserTextRoutesContinueChatToolToReply(t *testing.T) {
 	t.Parallel()
 
-	session := &fakeSession{}
+	session := &fakeChannel{}
 	toolCalled := false
 	replyCalled := false
 	service := newTestService(t,
@@ -598,10 +595,9 @@ func TestHandleASRRoutesContinueChatToolToReply(t *testing.T) {
 			},
 		},
 		&fakeTaskManager{},
-		speaker.New(),
 	)
 
-	service.handleASR(session, "你是谁")
+	service.handleUserText(testHistoryKey, session, "你是谁")
 
 	if toolCalled {
 		t.Fatal("toolCalled = true, want false")
@@ -611,10 +607,10 @@ func TestHandleASRRoutesContinueChatToolToReply(t *testing.T) {
 	}
 }
 
-func TestHandleASRAcceptsAsyncTask(t *testing.T) {
+func TestHandleUserTextAcceptsAsyncTask(t *testing.T) {
 	t.Parallel()
 
-	session := &fakeSession{}
+	session := &fakeChannel{}
 	taskManager := &fakeTaskManager{}
 	service := newTestService(t,
 		Config{AbortAfterASR: true, PostAbortDelay: 0},
@@ -648,20 +644,19 @@ func TestHandleASRAcceptsAsyncTask(t *testing.T) {
 			},
 		},
 		taskManager,
-		speaker.New(),
 	)
 
-	service.handleASR(session, "做一个小游戏网页")
+	service.handleUserText(testHistoryKey, session, "做一个小游戏网页")
 
 	if taskManager.submittedSpec.Title != "小游戏网页" {
 		t.Fatalf("submitted title = %q", taskManager.submittedSpec.Title)
 	}
 }
 
-func TestHandleASRForcesExternalReplyWhenIntentSaysNo(t *testing.T) {
+func TestHandleUserTextForcesExternalReplyWhenIntentSaysNo(t *testing.T) {
 	t.Parallel()
 
-	session := &fakeSession{}
+	session := &fakeChannel{}
 	service := newTestService(t,
 		Config{AbortAfterASR: true, PostAbortDelay: 0},
 		fakeIntent{
@@ -678,27 +673,26 @@ func TestHandleASRForcesExternalReplyWhenIntentSaysNo(t *testing.T) {
 		fakeReply{},
 		fakeTools{},
 		&fakeTaskManager{},
-		speaker.New(),
 	)
 
-	service.handleASR(session, "你在干啥呀")
+	service.handleUserText(testHistoryKey, session, "你在干啥呀")
 
 	order, abortCalls := session.snapshot()
 	if abortCalls != 1 {
 		t.Fatalf("abortCalls = %d, want 1", abortCalls)
 	}
 	if len(order) < 2 {
-		t.Fatalf("order = %#v, want abort then run_shell", order)
+		t.Fatalf("order = %#v, want prepare then speak", order)
 	}
-	if order[0] != "abort" || order[1] != "run_shell" {
-		t.Fatalf("order = %#v, want [abort run_shell ...]", order)
+	if order[0] != "prepare" || order[1] != "speak" {
+		t.Fatalf("order = %#v, want [prepare speak ...]", order)
 	}
 }
 
-func TestHandleASRIncludesSessionHistory(t *testing.T) {
+func TestHandleUserTextIncludesSessionHistory(t *testing.T) {
 	t.Parallel()
 
-	session := &fakeSession{}
+	session := &fakeChannel{}
 	var seenHistory []llm.Message
 
 	service := newTestService(t,
@@ -726,21 +720,20 @@ func TestHandleASRIncludesSessionHistory(t *testing.T) {
 		fakeReply{},
 		fakeTools{},
 		&fakeTaskManager{},
-		speaker.New(),
 	)
 
-	service.handleASR(session, "你是谁")
+	service.handleUserText(testHistoryKey, session, "你是谁")
 	if len(seenHistory) != 0 {
 		t.Fatalf("first history = %#v, want empty", seenHistory)
 	}
 
-	service.handleASR(session, "第二句呢")
+	service.handleUserText(testHistoryKey, session, "第二句呢")
 }
 
-func TestHandleASRUsesSpeculativeReplyWhenEnabled(t *testing.T) {
+func TestHandleUserTextUsesSpeculativeReplyWhenEnabled(t *testing.T) {
 	t.Parallel()
 
-	session := &fakeSession{}
+	session := &fakeChannel{}
 	replyStarted := make(chan struct{}, 1)
 	intentMayReturn := make(chan struct{})
 	streamCalls := 0
@@ -782,10 +775,9 @@ func TestHandleASRUsesSpeculativeReplyWhenEnabled(t *testing.T) {
 		},
 		fakeTools{},
 		&fakeTaskManager{},
-		speaker.New(),
 	)
 
-	service.handleASR(session, "你在干嘛")
+	service.handleUserText(testHistoryKey, session, "你在干嘛")
 
 	if streamCalls != 1 {
 		t.Fatalf("streamCalls = %d, want 1", streamCalls)

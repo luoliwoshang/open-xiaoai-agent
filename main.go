@@ -21,8 +21,8 @@ import (
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugins/weather"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/server"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/settings"
-	"github.com/luoliwoshang/open-xiaoai-agent/internal/speaker"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/tasks"
+	"github.com/luoliwoshang/open-xiaoai-agent/internal/voice/xiaoai"
 )
 
 func main() {
@@ -54,7 +54,6 @@ func main() {
 	log.Printf("loaded SOUL.md (%d chars)", len(appConfig.Soul))
 	log.Printf("loaded models: intent=%s reply=%s", appConfig.Intent.Model, appConfig.Reply.Model)
 	llmClient := llm.NewClient()
-	spk := speaker.New()
 	weatherClient := amap.NewClient(appConfig.AMap.APIKey)
 	settingsStore, err := settings.NewStore(dsn)
 	if err != nil {
@@ -96,14 +95,15 @@ func main() {
 		plugins,
 		taskManager,
 		imService,
-		spk,
 	)
 	if err != nil {
 		log.Fatal(err)
 	}
 	taskManager.SetResultReportHook(asrService.TryDeliverTaskResultReports)
 
-	srv := server.New(cfg, asrService.OnASR)
+	srv := server.New(cfg, func(session *server.Session, text string) {
+		asrService.HandleUserText(session.HistoryKey(), xiaoai.NewChannel(session), text)
+	})
 	go func() {
 		if err := dashboard.New(*dashboardAddr, taskManager, complexTaskService, asrService, settingsStore, imService, logStore).ListenAndServe(); err != nil {
 			log.Printf("dashboard stopped: %v", err)

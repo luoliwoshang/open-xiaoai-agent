@@ -18,7 +18,7 @@ export const emptyState: DashboardState = {
   assistant: {
     busy: false,
     result_report_ready: false,
-    has_session: false,
+    has_voice_channel: false,
   },
   settings: {
     session_window_seconds: 300,
@@ -124,6 +124,6 @@ function normalizeAssistantRuntime(raw: Partial<AssistantRuntimeStatus> | undefi
   return {
     busy: raw?.busy ?? false,
     result_report_ready: raw?.result_report_ready ?? false,
-    has_session: raw?.has_session ?? false,
+    has_voice_channel: raw?.has_voice_channel ?? false,
   }
 }

@@ -92,7 +92,7 @@ export function DashboardPage({ data, loading, error, setData: _setData }: Props
         className: 'service-pill service-pill-pending',
       }
     }
-    if (!data.assistant.has_session) {
+    if (!data.assistant.has_voice_channel) {
       return {
         label: '等待连接',
         className: 'service-pill service-pill-neutral',

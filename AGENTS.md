@@ -85,9 +85,11 @@ Only the high-signal parts are listed here.
   - MySQL-backed task store and manager
 - `internal/server`
   - WebSocket server / session / RPC protocol
-- `internal/speaker`
-  - device playback wrappers
-  - single text playback + streamed chunk playback
+- `internal/voice`
+  - generic voice-channel abstraction used by assistant
+  - stream speaker helper for chunked spoken playback
+- `internal/voice/xiaoai`
+  - current XiaoAI voice adapter implementation
 - `internal/dashboard`
   - API side for dashboard state
 - `internal/logs`
@@ -285,9 +287,10 @@ Current assumed flow:
 1. user wakes original XiaoAI
 2. original XiaoAI does ASR
 3. Rust client forwards `SpeechRecognizer.RecognizeResult`
-4. backend optionally aborts original XiaoAI
-5. backend handles routing + reply/tool/task logic
-6. TTS is played back through client shell/RPC mechanisms
+4. backend wraps the XiaoAI connection into a voice-channel adapter
+5. backend optionally interrupts the native voice flow as part of playback preparation
+6. backend handles routing + reply/tool/task logic
+7. TTS is played back through the selected voice channel
 
 Current voice-turn scheduling rule:
 
@@ -298,7 +301,13 @@ Current voice-turn scheduling rule:
 The project still fundamentally reuses:
 
 - XiaoAI wakeup + ASR path
-- XiaoAI/open-xiaoai client playback path
+- the current XiaoAI/open-xiaoai voice adapter path
+
+Voice abstraction note:
+
+- assistant main flow now targets a generic voice channel instead of depending directly on `*server.Session`
+- `HandleUserText(historyKey, channel, text)` is the main text-entrypoint inside assistant
+- XiaoAI-specific playback details such as daemon restart and `tts_play.sh` live inside `internal/voice/xiaoai`
 
 ## Intent / Reply Behavior
 

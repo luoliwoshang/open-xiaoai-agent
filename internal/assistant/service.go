@@ -11,15 +11,9 @@ import (
 
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/llm"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugin"
-	"github.com/luoliwoshang/open-xiaoai-agent/internal/server"
-	"github.com/luoliwoshang/open-xiaoai-agent/internal/speaker"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/tasks"
+	"github.com/luoliwoshang/open-xiaoai-agent/internal/voice"
 )
-
-type xiaoAISession interface {
-	speaker.ShellRunner
-	AbortXiaoAI(timeout time.Duration) error
-}
 
 // IntentDecider 负责主流程里的“意图路由判断”。
 //
@@ -75,12 +69,12 @@ type Service struct {
 	tools   ToolRunner
 	tasks   TaskManager
 	mirror  MirrorSender
-	spk     *speaker.Speaker
 	history *historyStore
 
 	runtimeMu         sync.Mutex
 	busy              bool
-	lastSession       xiaoAISession
+	lastHistoryKey    string
+	lastChannel       voice.Channel
 	resultReportReady bool
 }
 
@@ -89,14 +83,14 @@ type Service struct {
 // 这份状态主要给 dashboard 和排障使用，用来回答：
 // 1. 当前是否还有一轮会发声的主流程正在执行；
 // 2. 当前是否有任务结果已经 ready，但因为语音通道忙而暂时还没做结果汇报；
-// 3. 当前是否已经拿到一个可用于主动播报的最近 session。
+// 3. 当前是否已经拿到一个可用于主动播报的最近语音通道。
 type RuntimeStatus struct {
 	Busy              bool `json:"busy"`
 	ResultReportReady bool `json:"result_report_ready"`
-	HasSession        bool `json:"has_session"`
+	HasVoiceChannel   bool `json:"has_voice_channel"`
 }
 
-func New(config Config, sessionSettings sessionWindowProvider, intent IntentDecider, reply ReplyStreamer, tools ToolRunner, taskManager TaskManager, mirror MirrorSender, spk *speaker.Speaker) (*Service, error) {
+func New(config Config, sessionSettings sessionWindowProvider, intent IntentDecider, reply ReplyStreamer, tools ToolRunner, taskManager TaskManager, mirror MirrorSender) (*Service, error) {
 	if config.PostAbortDelay < 0 {
 		config.PostAbortDelay = 0
 	}
@@ -111,7 +105,6 @@ func New(config Config, sessionSettings sessionWindowProvider, intent IntentDeci
 		tools:   tools,
 		tasks:   taskManager,
 		mirror:  mirror,
-		spk:     spk,
 		history: history,
 	}, nil
 }
@@ -142,39 +135,45 @@ func (s *Service) RuntimeStatus() RuntimeStatus {
 	return RuntimeStatus{
 		Busy:              s.busy,
 		ResultReportReady: s.resultReportReady,
-		HasSession:        s.lastSession != nil,
+		HasVoiceChannel:   s.lastChannel != nil,
 	}
 }
 
-// OnASR 是设备侧最终 ASR 文本进入主流程的入口。
-// 当前实现把“会发声的主流程”串成单通道：如果上一轮还没结束，新的 ASR 会被直接忽略。
-func (s *Service) OnASR(session *server.Session, text string) {
-	if !s.tryBeginVoiceTurn(session) {
-		log.Printf("ignore asr while assistant busy: %s", previewText(text, 80))
+type historyRef string
+
+func (r historyRef) HistoryKey() string {
+	return string(r)
+}
+
+// HandleUserText 是“用户文本进入主流程”的统一入口。
+// 当前实现把“会发声的主流程”串成单通道：如果上一轮还没结束，新的输入会被直接忽略。
+func (s *Service) HandleUserText(historyKey string, channel voice.Channel, text string) {
+	if !s.tryBeginVoiceTurn(historyKey, channel) {
+		log.Printf("ignore user text while assistant busy: %s", previewText(text, 80))
 		return
 	}
 
 	go func() {
 		defer s.finishVoiceTurn()
-		s.handleASR(session, text)
+		s.handleUserText(historyKey, channel, text)
 	}()
 }
 
 // TryDeliverTaskResultReports 在任务系统通知“有待汇报结果”时被调用。
 // 如果当前语音通道空闲，就主动做任务结果汇报；如果当前仍在处理别的语音主流程，就先挂起，等本轮结束后再汇报。
 func (s *Service) TryDeliverTaskResultReports() {
-	session, ok := s.tryBeginResultReportTurn()
+	historyKey, channel, ok := s.tryBeginResultReportTurn()
 	if !ok {
 		return
 	}
 
 	go func() {
 		defer s.finishVoiceTurn()
-		s.deliverTaskResultReports(session)
+		s.deliverTaskResultReports(historyKey, channel)
 	}()
 }
 
-func (s *Service) handleASR(session xiaoAISession, text string) {
+func (s *Service) handleUserText(historyKey string, channel voice.Channel, text string) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return
@@ -191,16 +190,16 @@ func (s *Service) handleASR(session xiaoAISession, text string) {
 		if !shouldDeliverResultReports {
 			return
 		}
-		s.deliverTaskResultReports(session)
+		s.deliverTaskResultReports(historyKey, channel)
 	}()
 
 	now := time.Now()
-	history := s.history.Snapshot(session, now)
+	history := s.history.Snapshot(historyRef(historyKey), now)
 	metrics := newTurnMetrics(now, text, len(history))
 
-	log.Printf("xiaoai command: %s", text)
+	log.Printf("user text: %s", text)
 
-	if handled := s.handleDemo(session, text); handled {
+	if handled := s.handleDemo(historyKey, channel, text); handled {
 		return
 	}
 
@@ -208,11 +207,11 @@ func (s *Service) handleASR(session xiaoAISession, text string) {
 	// 如果配置为“ASR 后立即接管”，就先打断原生小爱后续链路，
 	// 避免它继续自己播报或执行，确保后面的回复由当前 Agent 服务统一接管。
 	if s.config.AbortAfterASR {
-		if !s.abort(session) {
+		if !s.preparePlayback(channel, false, true) {
 			return
 		}
 		interrupted = true
-		log.Printf("xiaoai aborted before intent")
+		log.Printf("voice channel prepared before intent")
 	}
 
 	var speculative *speculativeReply
@@ -267,7 +266,7 @@ func (s *Service) handleASR(session xiaoAISession, text string) {
 			if speculative != nil {
 				speculative.Cancel()
 			}
-			shouldDeliverResultReports = s.handleToolCall(session, history, now, text, *decision.ToolCall, interrupted, decision.ShouldAbort, metrics)
+			shouldDeliverResultReports = s.handleToolCall(historyKey, channel, history, now, text, *decision.ToolCall, interrupted, decision.ShouldAbort, metrics)
 			return
 		}
 	}
@@ -279,11 +278,11 @@ func (s *Service) handleASR(session xiaoAISession, text string) {
 	decision.ShouldHandle = true
 	decision.ShouldAbort = true
 
-	if !s.preparePlayback(session, interrupted, decision.ShouldAbort) {
+	if !s.preparePlayback(channel, interrupted, decision.ShouldAbort) {
 		return
 	}
 
-	player := speaker.NewStreamPlayer(s.spk, session, 30*time.Second, 100*time.Millisecond)
+	player := voice.NewStreamSpeaker(channel, 30*time.Second, 100*time.Millisecond)
 
 	var replyText strings.Builder
 	if speculative != nil {
@@ -317,7 +316,7 @@ func (s *Service) handleASR(session xiaoAISession, text string) {
 		return
 	}
 
-	s.history.AppendTurn(session, now, text, strings.TrimSpace(replyText.String()))
+	s.history.AppendTurn(historyRef(historyKey), now, text, strings.TrimSpace(replyText.String()))
 	s.mirrorReply(replyText.String())
 	shouldDeliverResultReports = true
 	metrics.LogCompleted("reply playback")
@@ -339,7 +338,7 @@ func (s *Service) handleASR(session xiaoAISession, text string) {
 //     工具返回的文本可以直接播，不需要再过 reply 模型包装；
 //  3. 默认模式
 //     先拿到工具原始结果，再交给 reply 模型整理成更适合语音播报的话术后播放。
-func (s *Service) handleToolCall(session xiaoAISession, history []llm.Message, turnStartedAt time.Time, userText string, call llm.ToolCall, interrupted bool, shouldAbort bool, metrics *turnMetrics) bool {
+func (s *Service) handleToolCall(historyKey string, channel voice.Channel, history []llm.Message, turnStartedAt time.Time, userText string, call llm.ToolCall, interrupted bool, shouldAbort bool, metrics *turnMetrics) bool {
 	if s.tools == nil {
 		log.Printf("tool runner not configured: %s", call.Name)
 		return false
@@ -347,7 +346,7 @@ func (s *Service) handleToolCall(session xiaoAISession, history []llm.Message, t
 
 	// 进入工具分支前，先确保设备侧已经完成接管并准备好播放。
 	// shouldAbort 来自 intent 判定，用于决定这里是否还需要再补一次 abort/等待。
-	if !s.preparePlayback(session, interrupted, shouldAbort) {
+	if !s.preparePlayback(channel, interrupted, shouldAbort) {
 		return false
 	}
 
@@ -377,19 +376,19 @@ func (s *Service) handleToolCall(session xiaoAISession, history []llm.Message, t
 	// 而是先受理成一个后台任务；当前只播报“收到，我先处理”，
 	// 真正完成后的结果会走“任务结果汇报”机制在后续时机继续汇报。
 	if result.NormalizedOutputMode() == plugin.OutputModeAsyncAccept {
-		return s.handleAsyncTask(session, turnStartedAt, userText, call, result, metrics)
+		return s.handleAsyncTask(historyKey, channel, turnStartedAt, userText, call, result, metrics)
 	}
 
 	// direct 表示工具自己已经产出了最终可播报文本，
 	// 不再经过 reply 模型二次整理，直接播放原文即可。
 	if result.NormalizedOutputMode() == plugin.OutputModeDirect {
 		metrics.MarkOutputStart("tool")
-		if err := s.spk.PlayText(session, result.Text, 30*time.Second); err != nil {
+		if err := channel.SpeakText(result.Text, 30*time.Second); err != nil {
 			log.Printf("tool reply playback failed: tool=%s err=%v", call.Name, err)
 			return false
 		}
 
-		s.history.AppendTurn(session, turnStartedAt, userText, strings.TrimSpace(result.Text))
+		s.history.AppendTurn(historyRef(historyKey), turnStartedAt, userText, strings.TrimSpace(result.Text))
 		s.mirrorReply(result.Text)
 		metrics.LogCompleted("tool reply playback")
 		log.Printf("tool reply playback completed: tool=%s", call.Name)
@@ -402,7 +401,7 @@ func (s *Service) handleToolCall(session xiaoAISession, history []llm.Message, t
 	// 默认模式下，工具返回的是“原始结果”而不是最终话术。
 	// 这里再调用 reply 模型把工具结果整理成更自然、适合 TTS 的口语化回复，
 	// 然后走流式播放器一边生成一边播报。
-	player := speaker.NewStreamPlayer(s.spk, session, 30*time.Second, 100*time.Millisecond)
+	player := voice.NewStreamSpeaker(channel, 30*time.Second, 100*time.Millisecond)
 	var replyText strings.Builder
 	if err := s.reply.StreamToolResult(ctx, history, userText, call.Name, result.Text, func(delta string) error {
 		metrics.MarkOutputStart("tool_reply")
@@ -423,7 +422,7 @@ func (s *Service) handleToolCall(session xiaoAISession, history []llm.Message, t
 		return false
 	}
 
-	s.history.AppendTurn(session, turnStartedAt, userText, finalReply)
+	s.history.AppendTurn(historyRef(historyKey), turnStartedAt, userText, finalReply)
 	s.mirrorReply(finalReply)
 	metrics.LogCompleted("tool reply playback")
 	log.Printf("tool reply playback completed: tool=%s", call.Name)
@@ -445,7 +444,7 @@ func (s *Service) handleToolCall(session xiaoAISession, history []llm.Message, t
 //
 // 返回值表示：handleASR 收尾阶段是否应该顺手做任务结果汇报。
 // 当前实现里，受理文案成功播出后才返回 true。
-func (s *Service) handleAsyncTask(session xiaoAISession, turnStartedAt time.Time, userText string, call llm.ToolCall, result plugin.Result, metrics *turnMetrics) bool {
+func (s *Service) handleAsyncTask(historyKey string, channel voice.Channel, turnStartedAt time.Time, userText string, call llm.ToolCall, result plugin.Result, metrics *turnMetrics) bool {
 	if s.tasks == nil {
 		log.Printf("task manager not configured: tool=%s", call.Name)
 		return false
@@ -471,45 +470,53 @@ func (s *Service) handleAsyncTask(session xiaoAISession, turnStartedAt time.Time
 
 	// 这里只播放受理反馈，不等待后台任务完成。
 	metrics.MarkOutputStart("async_accept")
-	if err := s.spk.PlayText(session, replyText, 30*time.Second); err != nil {
+	if err := channel.SpeakText(replyText, 30*time.Second); err != nil {
 		log.Printf("async accept playback failed: tool=%s err=%v", call.Name, err)
 		return false
 	}
-	s.history.AppendTurn(session, turnStartedAt, userText, replyText)
+	s.history.AppendTurn(historyRef(historyKey), turnStartedAt, userText, replyText)
 	s.mirrorReply(replyText)
 	metrics.LogCompleted("async task accept")
 	return true
 }
 
-func (s *Service) handleDemo(session xiaoAISession, text string) bool {
+func (s *Service) handleDemo(historyKey string, channel voice.Channel, text string) bool {
 	switch text {
 	case "测试播放文字":
-		if !s.abort(session) {
+		if !s.preparePlayback(channel, false, true) {
 			return true
 		}
-		time.Sleep(s.config.PostAbortDelay)
-		if err := s.spk.PlayText(session, "你好，很高兴认识你！", 30*time.Second); err != nil {
+		if err := channel.SpeakText("你好，很高兴认识你！", 30*time.Second); err != nil {
 			log.Printf("play text failed: %v", err)
 			return true
 		}
+		s.history.AppendTurn(historyRef(historyKey), time.Now(), text, "你好，很高兴认识你！")
 		log.Printf("played demo reply text")
 		return true
 	case "测试长段播放文字":
-		if !s.abort(session) {
+		if !s.preparePlayback(channel, false, true) {
 			return true
 		}
-		time.Sleep(s.config.PostAbortDelay)
-		if err := s.spk.PlayTextStream(session, []string{
+		player := voice.NewStreamSpeaker(channel, 30*time.Second, 100*time.Millisecond)
+		chunks := []string{
 			"你好，我现在开始演示流式文字播放。",
 			"这段回复不会一次性整段播完，",
 			"而是像 migpt 一样，",
 			"按多段文字顺序调用音箱本地 TTS。",
 			"每一段播完之后，",
 			"再继续播放下一段。",
-		}, 30*time.Second, 100*time.Millisecond); err != nil {
+		}
+		for _, chunk := range chunks {
+			if err := player.Push(chunk); err != nil {
+				log.Printf("play text stream failed: %v", err)
+				return true
+			}
+		}
+		if err := player.Close(); err != nil {
 			log.Printf("play text stream failed: %v", err)
 			return true
 		}
+		s.history.AppendTurn(historyRef(historyKey), time.Now(), text, strings.Join(chunks, ""))
 		log.Printf("played demo reply text stream")
 		return true
 	default:
@@ -521,7 +528,7 @@ func isContinueChatTool(call llm.ToolCall) bool {
 	return strings.TrimSpace(call.Name) == "continue_chat"
 }
 
-func (s *Service) tryBeginVoiceTurn(session xiaoAISession) bool {
+func (s *Service) tryBeginVoiceTurn(historyKey string, channel voice.Channel) bool {
 	s.runtimeMu.Lock()
 	defer s.runtimeMu.Unlock()
 
@@ -529,35 +536,41 @@ func (s *Service) tryBeginVoiceTurn(session xiaoAISession) bool {
 		return false
 	}
 	s.busy = true
-	if session != nil {
-		s.lastSession = session
+	if channel != nil {
+		s.lastChannel = channel
+	}
+	if strings.TrimSpace(historyKey) != "" {
+		s.lastHistoryKey = strings.TrimSpace(historyKey)
 	}
 	return true
 }
 
-func (s *Service) tryBeginResultReportTurn() (xiaoAISession, bool) {
+func (s *Service) tryBeginResultReportTurn() (string, voice.Channel, bool) {
 	s.runtimeMu.Lock()
 	defer s.runtimeMu.Unlock()
 
 	s.resultReportReady = true
-	if s.busy || s.lastSession == nil {
-		return nil, false
+	if s.busy || s.lastChannel == nil || strings.TrimSpace(s.lastHistoryKey) == "" {
+		return "", nil, false
 	}
 
-	session := s.lastSession
+	historyKey := s.lastHistoryKey
+	channel := s.lastChannel
 	s.busy = true
 	s.resultReportReady = false
-	return session, true
+	return historyKey, channel, true
 }
 
 func (s *Service) finishVoiceTurn() {
-	var session xiaoAISession
+	var historyKey string
+	var channel voice.Channel
 	startPending := false
 
 	s.runtimeMu.Lock()
 	s.busy = false
-	if s.resultReportReady && s.lastSession != nil {
-		session = s.lastSession
+	if s.resultReportReady && s.lastChannel != nil && strings.TrimSpace(s.lastHistoryKey) != "" {
+		historyKey = s.lastHistoryKey
+		channel = s.lastChannel
 		s.busy = true
 		s.resultReportReady = false
 		startPending = true
@@ -570,32 +583,27 @@ func (s *Service) finishVoiceTurn() {
 
 	go func() {
 		defer s.finishVoiceTurn()
-		s.deliverTaskResultReports(session)
+		s.deliverTaskResultReports(historyKey, channel)
 	}()
 }
 
-func (s *Service) abort(session xiaoAISession) bool {
-	if err := session.AbortXiaoAI(5 * time.Second); err != nil {
-		log.Printf("abort xiaoai failed: %v", err)
+func (s *Service) preparePlayback(channel voice.Channel, interrupted bool, shouldAbort bool) bool {
+	if channel == nil {
+		log.Printf("voice channel is not configured")
+		return false
+	}
+	if err := channel.PreparePlayback(voice.PlaybackOptions{
+		InterruptNativeFlow:   shouldAbort,
+		NativeFlowInterrupted: interrupted,
+		PostInterruptDelay:    s.config.PostAbortDelay,
+	}); err != nil {
+		log.Printf("prepare playback failed: %v", err)
 		return false
 	}
 	return true
 }
 
-func (s *Service) preparePlayback(session xiaoAISession, interrupted bool, shouldAbort bool) bool {
-	if !interrupted && shouldAbort {
-		if !s.abort(session) {
-			return false
-		}
-		interrupted = true
-	}
-	if interrupted {
-		time.Sleep(s.config.PostAbortDelay)
-	}
-	return true
-}
-
-func (s *Service) deliverTaskResultReports(session xiaoAISession) {
+func (s *Service) deliverTaskResultReports(historyKey string, channel voice.Channel) {
 	if s.tasks == nil {
 		return
 	}
@@ -605,12 +613,12 @@ func (s *Service) deliverTaskResultReports(session xiaoAISession) {
 	}
 
 	reportContext := buildTaskResultReportContext(items)
-	history := s.history.Snapshot(session, time.Now())
+	history := s.history.Snapshot(historyRef(historyKey), time.Now())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	player := speaker.NewStreamPlayer(s.spk, session, 30*time.Second, 100*time.Millisecond)
+	player := voice.NewStreamSpeaker(channel, 30*time.Second, 100*time.Millisecond)
 	var replyText strings.Builder
 	if err := s.reply.StreamTaskResultReport(ctx, history, reportContext, func(delta string) error {
 		replyText.WriteString(delta)
@@ -630,7 +638,7 @@ func (s *Service) deliverTaskResultReports(session xiaoAISession) {
 		return
 	}
 
-	s.history.AppendTurn(session, time.Now(), "", finalReply)
+	s.history.AppendTurn(historyRef(historyKey), time.Now(), "", finalReply)
 	s.mirrorReply(finalReply)
 	if err := s.tasks.MarkResultReported(ids); err != nil {
 		log.Printf("mark task result report failed: %v", err)
