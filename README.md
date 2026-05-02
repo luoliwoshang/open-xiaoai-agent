@@ -76,7 +76,8 @@ flowchart TD
 - 使用 `reply` 模型流式生成回复，并通过设备侧 TTS 播放
 - 管理轻量异步任务，并在合适的时候汇报任务结果
 - 提供独立的 React + Vite dashboard
-- Dashboard 支持手动把一段识别文本送入当前主流程，便于调试语音编排链路
+- Dashboard 支持手动把一段识别文本送入服务端 debug 主流程；它与真实小爱入口共享主语音上下文，但不依赖真实设备在线
+- Dashboard 会展示当前小爱设备连接状况，方便确认 WebSocket client 是否在线
 - 提供后端日志中心，可在管理界面分页查看 Go server 日志
 - 使用 MySQL 保存任务、会话和插件私有状态
 - 会话上下文默认使用滑动窗口，并支持在 Dashboard 中调整窗口秒数
@@ -256,6 +257,7 @@ Go 后端只提供 API，前端位于 `web/`。
 - `GET /api/healthz`
 - `GET /api/logs`
 - `GET /api/state`
+- `GET /api/xiaoai/status`
 - `POST /api/assistant/asr`
 - `GET /api/settings`
 - `POST /api/settings/session`

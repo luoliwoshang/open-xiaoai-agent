@@ -14,13 +14,18 @@ import (
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugin"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/tasks"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/voice"
+	debugvoice "github.com/luoliwoshang/open-xiaoai-agent/internal/voice/debug"
 )
 
 var (
-	ErrVoiceChannelBusy      = errors.New("assistant voice channel is busy")
-	ErrNoVoiceChannel        = errors.New("no recent voice channel is available")
-	ErrNoConversationContext = errors.New("no recent conversation context is available")
+	ErrVoiceChannelBusy = errors.New("assistant voice channel is busy")
 )
+
+// MainVoiceHistoryKey 是当前主语音流程统一使用的会话历史键。
+//
+// 当前阶段不会按设备连接、websocket session 或 dashboard 调试入口分桶；
+// 真实 XiaoAI ASR 和 dashboard 手动注入 ASR 都会写入这同一段主语音上下文。
+const MainVoiceHistoryKey = "main-voice"
 
 // IntentDecider 负责主流程里的“意图路由判断”。
 //
@@ -78,6 +83,9 @@ type Service struct {
 	mirror  MirrorSender
 	history *historyStore
 
+	mainHistoryKey string
+	debugChannel   voice.Channel
+
 	runtimeMu         sync.Mutex
 	busy              bool
 	lastHistoryKey    string
@@ -106,13 +114,15 @@ func New(config Config, sessionSettings sessionWindowProvider, intent IntentDeci
 		return nil, err
 	}
 	return &Service{
-		config:  config,
-		intent:  intent,
-		reply:   reply,
-		tools:   tools,
-		tasks:   taskManager,
-		mirror:  mirror,
-		history: history,
+		config:         config,
+		intent:         intent,
+		reply:          reply,
+		tools:          tools,
+		tasks:          taskManager,
+		mirror:         mirror,
+		history:        history,
+		mainHistoryKey: MainVoiceHistoryKey,
+		debugChannel:   debugvoice.NewChannel("dashboard"),
 	}, nil
 }
 
@@ -168,10 +178,14 @@ func (s *Service) HandleUserText(historyKey string, channel voice.Channel, text 
 
 // SubmitRecognizedText 用于把一段“已经识别完成的用户文本”注入当前主流程。
 //
-// 这个入口主要给 dashboard 等调试入口使用：
-// - 它不会自己创建新的语音通道；
-// - 而是复用最近一次成功进入主流程的 historyKey 和 voice channel；
-// - 如果当前语音通道正忙，或者最近还没有可复用的通道/上下文，就返回明确错误。
+// 这个入口主要给 dashboard 调试入口使用：
+// - 它不依赖真实 XiaoAI 设备是否在线；
+// - 会复用主语音流程统一的 historyKey；
+// - 会使用服务端的 debug voice channel 执行整条主流程；
+// - 如果当前主流程正忙，仍然会遵守单通道串行规则并返回 busy。
+//
+// 这样 dashboard 可以稳定验证 intent / reply / tool / async task，
+// 同时它和真实小爱入口会共享同一段主语音上下文。
 func (s *Service) SubmitRecognizedText(text string) error {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -583,15 +597,11 @@ func (s *Service) tryBeginInjectedVoiceTurn() (string, voice.Channel, error) {
 	if s.busy {
 		return "", nil, ErrVoiceChannelBusy
 	}
-	if s.lastChannel == nil {
-		return "", nil, ErrNoVoiceChannel
-	}
-	if strings.TrimSpace(s.lastHistoryKey) == "" {
-		return "", nil, ErrNoConversationContext
-	}
 
 	s.busy = true
-	return s.lastHistoryKey, s.lastChannel, nil
+	s.lastHistoryKey = s.mainHistoryKey
+	s.lastChannel = s.debugChannel
+	return s.mainHistoryKey, s.debugChannel, nil
 }
 
 func (s *Service) tryBeginResultReportTurn() (string, voice.Channel, bool) {

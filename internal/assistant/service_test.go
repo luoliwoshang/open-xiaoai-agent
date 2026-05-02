@@ -301,10 +301,9 @@ func TestSubmitRecognizedTextRejectsWhenBusy(t *testing.T) {
 	}
 }
 
-func TestSubmitRecognizedTextUsesLatestVoiceChannel(t *testing.T) {
+func TestSubmitRecognizedTextUsesMainVoiceHistory(t *testing.T) {
 	t.Parallel()
 
-	channel := &fakeChannel{}
 	service := newTestService(t,
 		Config{AbortAfterASR: false, PostAbortDelay: 0},
 		fakeIntent{
@@ -320,24 +319,27 @@ func TestSubmitRecognizedTextUsesLatestVoiceChannel(t *testing.T) {
 		&fakeTaskManager{},
 	)
 
-	service.lastHistoryKey = testHistoryKey
-	service.lastChannel = channel
-
 	if err := service.SubmitRecognizedText("帮我总结一下今天的任务"); err != nil {
 		t.Fatalf("SubmitRecognizedText() error = %v", err)
 	}
 
 	waitUntil(t, time.Second, func() bool {
-		history := service.history.Snapshot(historyRef(testHistoryKey), time.Now())
+		history := service.history.Snapshot(historyRef(MainVoiceHistoryKey), time.Now())
 		return len(history) >= 2
 	})
 
-	history := service.history.Snapshot(historyRef(testHistoryKey), time.Now())
+	history := service.history.Snapshot(historyRef(MainVoiceHistoryKey), time.Now())
 	if history[len(history)-2].Role != "user" || history[len(history)-2].Content != "帮我总结一下今天的任务" {
 		t.Fatalf("user history = %+v", history[len(history)-2])
 	}
 	if history[len(history)-1].Role != "assistant" || history[len(history)-1].Content != "你好。" {
 		t.Fatalf("assistant history = %+v", history[len(history)-1])
+	}
+	if service.lastHistoryKey != MainVoiceHistoryKey {
+		t.Fatalf("lastHistoryKey = %q, want %q", service.lastHistoryKey, MainVoiceHistoryKey)
+	}
+	if service.lastChannel == nil {
+		t.Fatal("lastChannel = nil, want debug channel")
 	}
 }
 

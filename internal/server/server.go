@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -18,10 +19,21 @@ type Config struct {
 
 type ASRHandler func(session *Session, text string)
 
+type ConnectionStatus struct {
+	Connected          bool      `json:"connected"`
+	ActiveSessions     int       `json:"active_sessions"`
+	LastConnectedAt    time.Time `json:"last_connected_at"`
+	LastDisconnectedAt time.Time `json:"last_disconnected_at"`
+	LastRemoteAddr     string    `json:"last_remote_addr"`
+}
+
 type Server struct {
 	config   Config
 	onASR    ASRHandler
 	upgrader websocket.Upgrader
+
+	statusMu sync.RWMutex
+	status   ConnectionStatus
 }
 
 func New(config Config, onASR ASRHandler) *Server {
@@ -41,6 +53,12 @@ func (s *Server) ListenAndServe() error {
 	return http.ListenAndServe(s.config.Addr, mux)
 }
 
+func (s *Server) ConnectionStatus() ConnectionStatus {
+	s.statusMu.RLock()
+	defer s.statusMu.RUnlock()
+	return s.status
+}
+
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -50,8 +68,12 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	session := newSession(conn)
+	s.markConnected(r.RemoteAddr)
 	log.Printf("client connected: %s", r.RemoteAddr)
-	defer log.Printf("client disconnected: %s", r.RemoteAddr)
+	defer func() {
+		s.markDisconnected(r.RemoteAddr)
+		log.Printf("client disconnected: %s", r.RemoteAddr)
+	}()
 
 	conn.SetReadLimit(16 << 20)
 	conn.SetPongHandler(func(string) error {
@@ -86,6 +108,30 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				log.Printf("received binary stream: %d bytes", len(payload))
 			}
 		}
+	}
+}
+
+func (s *Server) markConnected(remoteAddr string) {
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
+
+	s.status.ActiveSessions++
+	s.status.Connected = s.status.ActiveSessions > 0
+	s.status.LastConnectedAt = time.Now()
+	s.status.LastRemoteAddr = remoteAddr
+}
+
+func (s *Server) markDisconnected(remoteAddr string) {
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
+
+	if s.status.ActiveSessions > 0 {
+		s.status.ActiveSessions--
+	}
+	s.status.Connected = s.status.ActiveSessions > 0
+	s.status.LastDisconnectedAt = time.Now()
+	if strings.TrimSpace(remoteAddr) != "" {
+		s.status.LastRemoteAddr = remoteAddr
 	}
 }
 

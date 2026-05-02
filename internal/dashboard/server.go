@@ -18,6 +18,7 @@ import (
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/im"
 	runtimelogs "github.com/luoliwoshang/open-xiaoai-agent/internal/logs"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugins/complextask"
+	agentserver "github.com/luoliwoshang/open-xiaoai-agent/internal/server"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/settings"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/tasks"
 )
@@ -31,6 +32,9 @@ type Server struct {
 		RuntimeStatus() assistant.RuntimeStatus
 		ResetConversationData() error
 		SubmitRecognizedText(text string) error
+	}
+	xiaoai interface {
+		ConnectionStatus() agentserver.ConnectionStatus
 	}
 	settings interface {
 		Snapshot() settings.Snapshot
@@ -61,6 +65,8 @@ func New(addr string, tasks *tasks.Manager, claude *complextask.Service, convers
 	RuntimeStatus() assistant.RuntimeStatus
 	ResetConversationData() error
 	SubmitRecognizedText(text string) error
+}, xiaoaiStatus interface {
+	ConnectionStatus() agentserver.ConnectionStatus
 }, runtimeSettings interface {
 	Snapshot() settings.Snapshot
 	UpdateSessionWindowSeconds(seconds int) (settings.Snapshot, error)
@@ -86,6 +92,7 @@ func New(addr string, tasks *tasks.Manager, claude *complextask.Service, convers
 		tasks:         tasks,
 		claude:        claude,
 		conversations: conversations,
+		xiaoai:        xiaoaiStatus,
 		settings:      runtimeSettings,
 		im:            imGateway,
 		logs:          logStore,
@@ -97,6 +104,7 @@ func (s *Server) ListenAndServe() error {
 	mux.HandleFunc("/api/healthz", s.handleHealth)
 	mux.HandleFunc("/api/state", s.handleState)
 	mux.HandleFunc("/api/assistant/asr", s.handleAssistantASR)
+	mux.HandleFunc("/api/xiaoai/status", s.handleXiaoAIStatus)
 	mux.HandleFunc("/api/tasks/", s.handleTaskArtifactDownload)
 	mux.HandleFunc("/api/logs", s.handleLogs)
 	mux.HandleFunc("/api/settings", s.handleSettings)
@@ -136,6 +144,10 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		conversations = s.conversations.SnapshotConversations()
 		assistantRuntime = s.conversations.RuntimeStatus()
 	}
+	var xiaoaiStatus agentserver.ConnectionStatus
+	if s.xiaoai != nil {
+		xiaoaiStatus = s.xiaoai.ConnectionStatus()
+	}
 	var runtimeSettings settings.Snapshot
 	if s.settings != nil {
 		runtimeSettings = s.settings.Snapshot()
@@ -151,8 +163,24 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		"claude_records": claudeRecords,
 		"conversations":  conversations,
 		"assistant":      assistantRuntime,
+		"xiaoai":         xiaoaiStatus,
 		"settings":       runtimeSettings,
 		"im":             imState,
+	})
+}
+
+func (s *Server) handleXiaoAIStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.xiaoai == nil {
+		http.Error(w, "xiaoai status is not configured", http.StatusServiceUnavailable)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"xiaoai": s.xiaoai.ConnectionStatus(),
 	})
 }
 
@@ -295,8 +323,6 @@ func (s *Server) handleAssistantASR(w http.ResponseWriter, r *http.Request) {
 		})
 	case errors.Is(err, assistant.ErrVoiceChannelBusy):
 		http.Error(w, err.Error(), http.StatusConflict)
-	case errors.Is(err, assistant.ErrNoVoiceChannel), errors.Is(err, assistant.ErrNoConversationContext):
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 	default:
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	}

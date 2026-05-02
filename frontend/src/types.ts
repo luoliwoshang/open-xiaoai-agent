@@ -66,6 +66,14 @@ export interface AssistantRuntimeStatus {
   has_voice_channel: boolean
 }
 
+export interface XiaoAIConnectionStatus {
+  connected: boolean
+  active_sessions: number
+  last_connected_at: string
+  last_disconnected_at: string
+  last_remote_addr: string
+}
+
 export interface SettingsSnapshot {
   session_window_seconds: number
   im_delivery_enabled: boolean
@@ -158,6 +166,7 @@ export interface DashboardState {
   claude_records: ClaudeRecord[]
   conversations: ConversationSnapshot[]
   assistant: AssistantRuntimeStatus
+  xiaoai: XiaoAIConnectionStatus
   settings: SettingsSnapshot
   im: IMSnapshot
 }

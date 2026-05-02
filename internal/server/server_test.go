@@ -77,6 +77,49 @@ func TestHandleEvent_IgnoresIrrelevantMessages(t *testing.T) {
 	}
 }
 
+func TestConnectionStatusTracksConnectLifecycle(t *testing.T) {
+	t.Parallel()
+
+	s := New(Config{}, nil)
+	s.markConnected("192.168.1.10:12345")
+	s.markConnected("192.168.1.11:12345")
+
+	status := s.ConnectionStatus()
+	if !status.Connected {
+		t.Fatal("Connected = false, want true")
+	}
+	if status.ActiveSessions != 2 {
+		t.Fatalf("ActiveSessions = %d, want 2", status.ActiveSessions)
+	}
+	if status.LastRemoteAddr != "192.168.1.11:12345" {
+		t.Fatalf("LastRemoteAddr = %q, want latest remote addr", status.LastRemoteAddr)
+	}
+	if status.LastConnectedAt.IsZero() {
+		t.Fatal("LastConnectedAt is zero")
+	}
+
+	s.markDisconnected("192.168.1.11:12345")
+	status = s.ConnectionStatus()
+	if !status.Connected {
+		t.Fatal("Connected = false after one disconnect, want true")
+	}
+	if status.ActiveSessions != 1 {
+		t.Fatalf("ActiveSessions = %d, want 1", status.ActiveSessions)
+	}
+
+	s.markDisconnected("192.168.1.10:12345")
+	status = s.ConnectionStatus()
+	if status.Connected {
+		t.Fatal("Connected = true, want false")
+	}
+	if status.ActiveSessions != 0 {
+		t.Fatalf("ActiveSessions = %d, want 0", status.ActiveSessions)
+	}
+	if status.LastDisconnectedAt.IsZero() {
+		t.Fatal("LastDisconnectedAt is zero")
+	}
+}
+
 func mustRawJSON(t *testing.T, v any) json.RawMessage {
 	t.Helper()
 

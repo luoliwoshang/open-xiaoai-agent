@@ -206,7 +206,9 @@ Task artifact cache:
 Conversation store:
 
 - persistent conversation windows used by `intent` and `reply`
-- conversation windows are keyed by session and expire by `last_active + session.window_seconds`
+- current main voice flow uses a shared conversation key `main-voice`
+- both real XiaoAI ASR and dashboard debug ASR write into that same main voice conversation window
+- conversation windows still expire by `last_active + session.window_seconds`
 
 Runtime settings store:
 
@@ -271,7 +273,7 @@ Conversation history is persisted and reused.
 Current rule:
 
 - conversation reuse is based on a sliding window
-- a session stays active while `last_active + session.window_seconds` has not expired
+- the shared main voice conversation stays active while `last_active + session.window_seconds` has not expired
 - current default is `300` seconds, and it can be adjusted through the dashboard settings API
 
 What gets written:
@@ -507,6 +509,7 @@ Important routes:
 - `GET /api/healthz`
 - `GET /api/logs`
 - `GET /api/state`
+- `GET /api/xiaoai/status`
 - `POST /api/assistant/asr`
 - `GET /api/tasks/{taskID}/artifacts/{artifactID}/download`
 - `GET /api/settings`
@@ -524,6 +527,13 @@ Important routes:
 - `POST /api/im/accounts/delete`
 - `POST /api/reset`
 
+Important behavior:
+
+- `POST /api/assistant/asr` is a server-side debug ASR injection entrypoint
+- it does not require a live XiaoAI device connection
+- it shares the same `main-voice` conversation context as the real XiaoAI entrypoint
+- it uses a dedicated debug voice channel while still obeying the assistant busy gate
+
 The frontend is separate and should stay that way.
 
 UI decisions that were explicitly requested:
@@ -535,7 +545,8 @@ UI decisions that were explicitly requested:
 - backend logs should live on their own page and not be mixed into `/api/state`
 - dashboard should feel intentional, not generic admin boilerplate
 - dashboard state should expose assistant voice-channel runtime status such as busy / result-report-ready / has-voice-channel
-- dashboard homepage can provide a manual ASR-debug input that injects recognized text into the current assistant flow using the latest reusable voice channel and conversation context
+- dashboard homepage can provide a manual ASR-debug input that injects recognized text into the current assistant flow using the shared `main-voice` conversation context and a dedicated debug voice channel
+- dashboard can expose the current XiaoAI websocket connection status so operators can quickly confirm whether a device bridge is online
 
 ## Frontend UI Style
 

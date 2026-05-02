@@ -1,12 +1,13 @@
 import { LayoutDashboard, FileText, Settings } from 'lucide-react'
-import type { AssistantRuntimeStatus } from '../types'
+import type { AssistantRuntimeStatus, XiaoAIConnectionStatus } from '../types'
 
 interface SidebarProps {
   page: string
   assistant: AssistantRuntimeStatus
+  xiaoai: XiaoAIConnectionStatus
 }
 
-export function Sidebar({ page, assistant }: SidebarProps) {
+export function Sidebar({ page, assistant, xiaoai }: SidebarProps) {
   const navItems = [
     { id: 'dashboard', label: '仪表盘', icon: LayoutDashboard },
     { id: 'logs', label: '日志', icon: FileText },
@@ -33,8 +34,12 @@ export function Sidebar({ page, assistant }: SidebarProps) {
       </nav>
       <div className="sidebar-status">
         <div className="status-row">
-          <span className={`status-dot ${assistant.has_voice_channel ? 'green' : 'gray'}`} />
-          <span>{assistant.has_voice_channel ? '语音可用' : '等待语音通道'}</span>
+          <span className={`status-dot ${xiaoai.connected ? 'green' : 'red'}`} />
+          <span>{xiaoai.connected ? '小爱已连接' : '小爱未连接'}</span>
+        </div>
+        <div className="status-row">
+          <span className={`status-dot ${assistant.has_voice_channel ? 'blue' : 'gray'}`} />
+          <span>{assistant.has_voice_channel ? '语音通道就绪' : '等待语音通道'}</span>
         </div>
         <div className="status-row">
           <span className={`status-dot ${assistant.busy ? 'yellow' : 'green'}`} />
@@ -44,6 +49,12 @@ export function Sidebar({ page, assistant }: SidebarProps) {
           <div className="status-row">
             <span className="status-dot blue" />
             <span>结果待汇报</span>
+          </div>
+        )}
+        {(xiaoai.connected || xiaoai.last_remote_addr) && (
+          <div className="status-row">
+            <span className="status-dot gray" />
+            <span>{xiaoai.last_remote_addr || `活动连接 ${xiaoai.active_sessions}`}</span>
           </div>
         )}
       </div>

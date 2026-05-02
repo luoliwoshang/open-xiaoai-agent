@@ -102,10 +102,10 @@ func main() {
 	taskManager.SetResultReportHook(asrService.TryDeliverTaskResultReports)
 
 	srv := server.New(cfg, func(session *server.Session, text string) {
-		asrService.HandleUserText(session.HistoryKey(), xiaoai.NewChannel(session), text)
+		asrService.HandleUserText(assistant.MainVoiceHistoryKey, xiaoai.NewChannel(session), text)
 	})
 	go func() {
-		if err := dashboard.New(*dashboardAddr, taskManager, complexTaskService, asrService, settingsStore, imService, logStore).ListenAndServe(); err != nil {
+		if err := dashboard.New(*dashboardAddr, taskManager, complexTaskService, asrService, srv, settingsStore, imService, logStore).ListenAndServe(); err != nil {
 			log.Printf("dashboard stopped: %v", err)
 		}
 	}()

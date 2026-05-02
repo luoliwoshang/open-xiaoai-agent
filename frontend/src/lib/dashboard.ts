@@ -15,6 +15,13 @@ export const emptyState: DashboardState = {
   claude_records: [],
   conversations: [],
   assistant: { busy: false, result_report_ready: false, has_voice_channel: false },
+  xiaoai: {
+    connected: false,
+    active_sessions: 0,
+    last_connected_at: '',
+    last_disconnected_at: '',
+    last_remote_addr: '',
+  },
   settings: {
     session_window_seconds: 300,
     im_delivery_enabled: false,
@@ -68,6 +75,7 @@ export function normalizeState(raw: Partial<DashboardState> | null | undefined):
     claude_records: raw.claude_records ?? [],
     conversations: raw.conversations ?? [],
     assistant: raw.assistant ?? { busy: false, result_report_ready: false, has_voice_channel: false },
+    xiaoai: raw.xiaoai ?? emptyState.xiaoai,
     settings: raw.settings ?? emptyState.settings,
     im: raw.im ?? emptyState.im,
   }

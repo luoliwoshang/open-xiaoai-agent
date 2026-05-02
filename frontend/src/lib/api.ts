@@ -13,8 +13,11 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     ...init,
   })
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-  return res.json()
+  const raw = await res.text()
+  if (!res.ok) {
+    throw new Error(raw.trim() || `${res.status} ${res.statusText}`)
+  }
+  return raw ? (JSON.parse(raw) as T) : (undefined as T)
 }
 
 export function fetchState(): Promise<DashboardState> {
