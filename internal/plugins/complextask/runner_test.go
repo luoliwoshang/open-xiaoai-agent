@@ -140,6 +140,8 @@ func TestBuildClaudePrompt(t *testing.T) {
 		"如果任务还没有真正结束，不要提前说已经完成",
 		".open-xiaoai-agent/artifacts/task_1.json",
 		"这个 JSON 文件只负责声明交付产物位置和元数据",
+		"不要提工作目录、相对路径、绝对路径、manifest、终端命令",
+		"普通人能直接听懂",
 	} {
 		if !strings.Contains(prompt, expected) {
 			t.Fatalf("buildClaudePrompt() missing %q in %q", expected, prompt)
@@ -156,6 +158,8 @@ func TestBuildClaudeResumePrompt(t *testing.T) {
 		"补充要求如下：把刚刚那个网页再加一个按钮",
 		"把这次输入视为对上一个任务的补充、修改或追加要求",
 		".open-xiaoai-agent/artifacts/task_2.json",
+		"不要提工作目录、相对路径、绝对路径、manifest、终端命令",
+		"普通人能直接听懂",
 	} {
 		if !strings.Contains(prompt, expected) {
 			t.Fatalf("buildClaudeResumePrompt() missing %q in %q", expected, prompt)

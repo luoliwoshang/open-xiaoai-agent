@@ -89,9 +89,10 @@ claude --dangerously-skip-permissions --print --output-format stream-json --verb
 - 进度汇报要简短
 - 不要输出太多影响 TTS 的 Markdown 噪音或特殊符号
 - 任务未完成时不要提前说已经完成
+- 面向用户的进度和最终总结，不要暴露工作目录、路径、manifest、命令行等内部工程细节
+- 面向用户的措辞尽量按普通人能直接听懂的方式表达，不要过于专业和冗长
 - 最终总结要尽量说明：
   - 完成了什么
-  - 产出放在哪里
   - 用户接下来怎么用
 
 这背后的核心目标不是让 Claude “更会写 prompt”，而是让 Claude 的输出更适合：

@@ -454,6 +454,8 @@ Prompt shaping rules currently enforced for new Claude tasks:
 - prefix with “执行以下任务：...”
 - ask for short progress updates
 - avoid weird symbols / markdown noise in progress
+- user-facing progress/final summaries should avoid workdir paths, manifest paths, terminal commands, and other executor-internal details
+- user-facing wording should stay plain and understandable for ordinary users, not overly professional or verbose
 - if Claude needs to hand files back to the system, it should write a manifest index file under `.open-xiaoai-agent/artifacts/<task_id>.json`
 - final summary should still be concise and TTS-friendly
 
