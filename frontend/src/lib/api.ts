@@ -47,12 +47,16 @@ export function saveIMDeliverySettings(settings: {
   return json('/settings/im-delivery', { method: 'POST', body: JSON.stringify(settings) })
 }
 
-export function startWeChatLogin(): Promise<WeChatLoginStart> {
-  return json('/im/wechat/login/start', { method: 'POST' })
+export async function startWeChatLogin(): Promise<WeChatLoginStart> {
+  const payload = await json<{ ok: boolean; login: WeChatLoginStart }>('/im/wechat/login/start', { method: 'POST' })
+  return payload.login
 }
 
-export function getWeChatLoginStatus(sessionKey: string): Promise<WeChatLoginStatus> {
-  return json(`/im/wechat/login/status?session_key=${encodeURIComponent(sessionKey)}`)
+export async function getWeChatLoginStatus(sessionKey: string): Promise<WeChatLoginStatus> {
+  const payload = await json<{ ok: boolean; status: WeChatLoginStatus }>(
+    `/im/wechat/login/status?session_key=${encodeURIComponent(sessionKey)}`,
+  )
+  return payload.status
 }
 
 export function confirmWeChatLogin(sessionKey: string): Promise<void> {

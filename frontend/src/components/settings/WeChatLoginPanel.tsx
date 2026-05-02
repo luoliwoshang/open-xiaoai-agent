@@ -2,12 +2,19 @@ import type { WeChatLoginStatus } from '../../types'
 
 interface WeChatLoginPanelProps {
   qrCodeDataUrl: string
+  qrRawText?: string
   loginStatus: WeChatLoginStatus | null
   onConfirm: () => void
   onCancel: () => void
 }
 
-export function WeChatLoginPanel({ qrCodeDataUrl, loginStatus, onConfirm, onCancel }: WeChatLoginPanelProps) {
+export function WeChatLoginPanel({
+  qrCodeDataUrl,
+  qrRawText,
+  loginStatus,
+  onConfirm,
+  onCancel,
+}: WeChatLoginPanelProps) {
   const statusText: Record<string, string> = {
     pending: '等待扫码...',
     scanned: '已扫码，请确认登录',
@@ -21,10 +28,21 @@ export function WeChatLoginPanel({ qrCodeDataUrl, loginStatus, onConfirm, onCanc
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-title">微信扫码登录</div>
         <div className="qr-code-container">
-          <img src={qrCodeDataUrl} alt="WeChat QR Code" className="qr-code-img" />
+          {qrCodeDataUrl ? (
+            <img src={qrCodeDataUrl} alt="WeChat QR Code" className="qr-code-img" />
+          ) : (
+            <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+              暂时没有拿到二维码图片，请稍后重试。
+            </div>
+          )}
           <div className="qr-status">
             {loginStatus ? statusText[loginStatus.status] || loginStatus.message : '加载中...'}
           </div>
+          {qrRawText && (
+            <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--text-ghost)', wordBreak: 'break-all' }}>
+              二维码链接：{qrRawText}
+            </div>
+          )}
           {loginStatus?.candidate && (
             <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--text-secondary)' }}>
               <div>检测到: {loginStatus.candidate.display_name}</div>

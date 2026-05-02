@@ -38,6 +38,8 @@ export function SettingsPage({ state, onReload }: SettingsPageProps) {
   const [loginData, setLoginData] = useState<WeChatLoginStart | null>(null)
   const [loginStatus, setLoginStatus] = useState<WeChatLoginStatus | null>(null)
   const loginPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const accounts = Array.isArray(state.im?.accounts) ? state.im.accounts : []
+  const targets = Array.isArray(state.im?.targets) ? state.im.targets : []
 
   const showToast = useCallback((msg: string, _isError = false) => {
     setToast(msg)
@@ -157,17 +159,17 @@ export function SettingsPage({ state, onReload }: SettingsPageProps) {
               {imTab === 'delivery' && (
                 <IMDeliveryPanel
                   enabled={state.settings.im_delivery_enabled}
-                  selectedAccountId={state.settings.im_selected_account_id || state.im.accounts[0]?.id || ''}
-                  selectedTargetId={state.settings.im_selected_target_id || selectBestTarget(state.im.targets)}
-                  accounts={state.im.accounts}
-                  targets={state.im.targets}
+                  selectedAccountId={state.settings.im_selected_account_id || accounts[0]?.id || ''}
+                  selectedTargetId={state.settings.im_selected_target_id || selectBestTarget(targets)}
+                  accounts={accounts}
+                  targets={targets}
                   onSave={handleSaveDelivery}
                 />
               )}
 
               {imTab === 'accounts' && (
                 <WeChatAccountsPanel
-                  accounts={state.im.accounts}
+                  accounts={accounts}
                   onDelete={async (id) => { await deleteAccount(id); onReload() }}
                   onLogin={handleStartLogin}
                 />
@@ -175,8 +177,8 @@ export function SettingsPage({ state, onReload }: SettingsPageProps) {
 
               {imTab === 'targets' && (
                 <IMTargetsPanel
-                  accounts={state.im.accounts}
-                  targets={state.im.targets}
+                  accounts={accounts}
+                  targets={targets}
                   onCreate={async (data) => { await createTarget(data); onReload() }}
                   onSetDefault={async (a, t) => { await setDefaultTarget(a, t); onReload() }}
                   onDelete={async (id) => { await deleteTarget(id); onReload() }}
@@ -190,6 +192,7 @@ export function SettingsPage({ state, onReload }: SettingsPageProps) {
       {loginData && (
         <WeChatLoginPanel
           qrCodeDataUrl={loginData.qr_code_data_url}
+          qrRawText={loginData.qr_raw_text}
           loginStatus={loginStatus}
           onConfirm={handleConfirmLogin}
           onCancel={handleCancelLogin}
