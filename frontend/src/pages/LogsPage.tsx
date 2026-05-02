@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
-import type { LogEntry, LogPage } from '../../types'
+import type { LogEntry, LogPage } from '../types'
 import { fetchLogs } from '../lib/api'
 
 const PAGE_SIZES = [20, 50, 100]

@@ -1,5 +1,5 @@
 import { LayoutDashboard, FileText, Settings } from 'lucide-react'
-import type { AssistantRuntimeStatus } from '../../types'
+import type { AssistantRuntimeStatus } from '../types'
 
 interface SidebarProps {
   page: string
@@ -33,8 +33,8 @@ export function Sidebar({ page, assistant }: SidebarProps) {
       </nav>
       <div className="sidebar-status">
         <div className="status-row">
-          <span className={`status-dot ${assistant.has_session ? 'green' : 'gray'}`} />
-          <span>{assistant.has_session ? '会话在线' : '无会话'}</span>
+          <span className={`status-dot ${assistant.has_voice_channel ? 'green' : 'gray'}`} />
+          <span>{assistant.has_voice_channel ? '语音可用' : '等待语音通道'}</span>
         </div>
         <div className="status-row">
           <span className={`status-dot ${assistant.busy ? 'yellow' : 'green'}`} />
@@ -43,7 +43,7 @@ export function Sidebar({ page, assistant }: SidebarProps) {
         {assistant.result_report_ready && (
           <div className="status-row">
             <span className="status-dot blue" />
-            <span>报告待推送</span>
+            <span>结果待汇报</span>
           </div>
         )}
       </div>

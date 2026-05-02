@@ -63,7 +63,7 @@ export interface ConversationSnapshot {
 export interface AssistantRuntimeStatus {
   busy: boolean
   result_report_ready: boolean
-  has_session: boolean
+  has_voice_channel: boolean
 }
 
 export interface SettingsSnapshot {

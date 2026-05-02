@@ -23,8 +23,10 @@ import (
 )
 
 type fakeConversations struct {
-	resetCalls int
-	runtime    assistant.RuntimeStatus
+	resetCalls    int
+	runtime       assistant.RuntimeStatus
+	submittedText string
+	submitErr     error
 }
 
 func (f *fakeConversations) SnapshotConversations() []assistant.ConversationSnapshot {
@@ -37,6 +39,14 @@ func (f *fakeConversations) RuntimeStatus() assistant.RuntimeStatus {
 
 func (f *fakeConversations) ResetConversationData() error {
 	f.resetCalls++
+	return nil
+}
+
+func (f *fakeConversations) SubmitRecognizedText(text string) error {
+	if f.submitErr != nil {
+		return f.submitErr
+	}
+	f.submittedText = text
 	return nil
 }
 
@@ -348,6 +358,53 @@ func TestHandleStateIncludesAssistantRuntime(t *testing.T) {
 	}
 	if !payload.Assistant.HasVoiceChannel {
 		t.Fatal("Assistant.HasVoiceChannel = false, want true")
+	}
+}
+
+func TestHandleAssistantASRAcceptsPostedText(t *testing.T) {
+	t.Parallel()
+
+	conversations := &fakeConversations{}
+	server := New(":0", nil, nil, conversations, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeIM{}, &fakeLogs{})
+	req := httptest.NewRequest(http.MethodPost, "/api/assistant/asr", strings.NewReader(`{"text":"帮我总结一下今天的任务"}`))
+	recorder := httptest.NewRecorder()
+
+	server.handleAssistantASR(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if conversations.submittedText != "帮我总结一下今天的任务" {
+		t.Fatalf("submittedText = %q, want payload text", conversations.submittedText)
+	}
+
+	var payload struct {
+		OK   bool   `json:"ok"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if !payload.OK {
+		t.Fatal("OK = false, want true")
+	}
+	if payload.Text != "帮我总结一下今天的任务" {
+		t.Fatalf("Text = %q, want payload text", payload.Text)
+	}
+}
+
+func TestHandleAssistantASRMapsBusyToConflict(t *testing.T) {
+	t.Parallel()
+
+	conversations := &fakeConversations{submitErr: assistant.ErrVoiceChannelBusy}
+	server := New(":0", nil, nil, conversations, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeIM{}, &fakeLogs{})
+	req := httptest.NewRequest(http.MethodPost, "/api/assistant/asr", strings.NewReader(`{"text":"帮我继续刚刚那个任务"}`))
+	recorder := httptest.NewRecorder()
+
+	server.handleAssistantASR(recorder, req)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d body=%s", recorder.Code, http.StatusConflict, recorder.Body.String())
 	}
 }
 

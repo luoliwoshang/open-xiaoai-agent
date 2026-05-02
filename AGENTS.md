@@ -18,6 +18,7 @@ This is a standalone Agent Server prototype that sits behind an `open-xiaoai` cl
 Current responsibilities:
 
 - receive final ASR text from the XiaoAI Rust client over WebSocket
+- accept dashboard-injected recognized text for assistant-flow debugging
 - optionally abort the original XiaoAI flow after ASR
 - run `intent` routing against tools / async tasks / task continuation
 - run `reply` generation for normal chat and tool-result summarization
@@ -25,7 +26,7 @@ Current responsibilities:
 - maintain lightweight async tasks
 - provide phase-1 IM gateway capability for WeChat text delivery plus default-channel image/file debug send
 - persist backend runtime logs and expose them through the dashboard API
-- expose a React dashboard over API + web frontend
+- expose a React dashboard over API + frontend workspace
 
 Current non-goals / known missing pieces:
 
@@ -53,7 +54,8 @@ Frontend/runtime tooling from `package.json`:
 
 - root workspace name: `open-xiaoai-agent`
 - uses `concurrently` to run Go and web together
-- frontend workspace lives in `web/`
+- active frontend workspace lives in `frontend/`
+- legacy `web/` still exists in the repo for transition, but new UI work should land in `frontend/`
 
 Important clarification:
 
@@ -99,8 +101,10 @@ Only the high-signal parts are listed here.
 - `internal/im`
   - phase-1 IM gateway
   - WeChat login / account / target / mirror delivery
+- `frontend/`
+  - current React dashboard workspace
 - `web/`
-  - React dashboard
+  - legacy dashboard workspace kept temporarily during transition
 
 ## Runtime Commands
 
@@ -115,6 +119,8 @@ Root scripts:
 
 - `npm run dev`
 - `npm run dev:go`
+- `npm run dev:fe`
+- `npm run build:fe`
 - `npm run dev:web`
 - `npm run build:web`
 - `npm run preview:web`
@@ -501,6 +507,7 @@ Important routes:
 - `GET /api/healthz`
 - `GET /api/logs`
 - `GET /api/state`
+- `POST /api/assistant/asr`
 - `GET /api/tasks/{taskID}/artifacts/{artifactID}/download`
 - `GET /api/settings`
 - `POST /api/settings/session`
@@ -527,7 +534,8 @@ UI decisions that were explicitly requested:
 - settings should live on a separate settings page
 - backend logs should live on their own page and not be mixed into `/api/state`
 - dashboard should feel intentional, not generic admin boilerplate
-- dashboard state should expose assistant voice-channel runtime status such as busy / result-report-ready / has-session
+- dashboard state should expose assistant voice-channel runtime status such as busy / result-report-ready / has-voice-channel
+- dashboard homepage can provide a manual ASR-debug input that injects recognized text into the current assistant flow using the latest reusable voice channel and conversation context
 
 ## Frontend UI Style
 

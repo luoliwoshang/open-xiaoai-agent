@@ -25,7 +25,7 @@ export default function App() {
             连接错误: {error}
           </div>
         )}
-        {page === 'dashboard' && <DashboardPage state={state} />}
+        {page === 'dashboard' && <DashboardPage state={state} onReload={reload} />}
         {page === 'logs' && <LogsPage />}
         {page === 'settings' && <SettingsPage state={state} onReload={reload} />}
       </main>

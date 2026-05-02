@@ -283,6 +283,64 @@ func TestHandleUserTextIgnoresNewInputWhileBusy(t *testing.T) {
 	}
 }
 
+func TestSubmitRecognizedTextRejectsWhenBusy(t *testing.T) {
+	t.Parallel()
+
+	service := newTestService(t,
+		Config{AbortAfterASR: true, PostAbortDelay: 0},
+		fakeIntent{},
+		fakeReply{},
+		fakeTools{},
+		&fakeTaskManager{},
+	)
+
+	service.busy = true
+	err := service.SubmitRecognizedText("帮我继续刚刚那个任务")
+	if !errors.Is(err, ErrVoiceChannelBusy) {
+		t.Fatalf("SubmitRecognizedText() error = %v, want %v", err, ErrVoiceChannelBusy)
+	}
+}
+
+func TestSubmitRecognizedTextUsesLatestVoiceChannel(t *testing.T) {
+	t.Parallel()
+
+	channel := &fakeChannel{}
+	service := newTestService(t,
+		Config{AbortAfterASR: false, PostAbortDelay: 0},
+		fakeIntent{
+			onDecide: func(history []llm.Message, text string) llm.IntentDecision {
+				return llm.IntentDecision{
+					ShouldHandle: true,
+					ShouldAbort:  false,
+				}
+			},
+		},
+		fakeReply{},
+		fakeTools{},
+		&fakeTaskManager{},
+	)
+
+	service.lastHistoryKey = testHistoryKey
+	service.lastChannel = channel
+
+	if err := service.SubmitRecognizedText("帮我总结一下今天的任务"); err != nil {
+		t.Fatalf("SubmitRecognizedText() error = %v", err)
+	}
+
+	waitUntil(t, time.Second, func() bool {
+		history := service.history.Snapshot(historyRef(testHistoryKey), time.Now())
+		return len(history) >= 2
+	})
+
+	history := service.history.Snapshot(historyRef(testHistoryKey), time.Now())
+	if history[len(history)-2].Role != "user" || history[len(history)-2].Content != "帮我总结一下今天的任务" {
+		t.Fatalf("user history = %+v", history[len(history)-2])
+	}
+	if history[len(history)-1].Role != "assistant" || history[len(history)-1].Content != "你好。" {
+		t.Fatalf("assistant history = %+v", history[len(history)-1])
+	}
+}
+
 func TestHandleUserTextDoesNotPrepareTwiceForToolCall(t *testing.T) {
 	t.Parallel()
 

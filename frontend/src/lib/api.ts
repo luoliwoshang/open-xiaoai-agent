@@ -21,6 +21,13 @@ export function fetchState(): Promise<DashboardState> {
   return json('/state')
 }
 
+export function submitAssistantASR(text: string): Promise<{ ok: boolean; text: string }> {
+  return json('/assistant/asr', {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  })
+}
+
 export function fetchLogs(page: number, pageSize: number): Promise<LogPage> {
   return json(`/logs?page=${page}&page_size=${pageSize}`)
 }
