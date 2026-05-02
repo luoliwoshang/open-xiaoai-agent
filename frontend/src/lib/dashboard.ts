@@ -14,7 +14,7 @@ export const emptyState: DashboardState = {
   artifacts: [],
   claude_records: [],
   conversations: [],
-  assistant: { busy: false, result_report_ready: false, has_session: false },
+  assistant: { busy: false, result_report_ready: false, has_voice_channel: false },
   settings: {
     session_window_seconds: 300,
     im_delivery_enabled: false,
@@ -67,7 +67,7 @@ export function normalizeState(raw: Partial<DashboardState> | null | undefined):
     artifacts: raw.artifacts ?? [],
     claude_records: raw.claude_records ?? [],
     conversations: raw.conversations ?? [],
-    assistant: raw.assistant ?? { busy: false, result_report_ready: false, has_session: false },
+    assistant: raw.assistant ?? { busy: false, result_report_ready: false, has_voice_channel: false },
     settings: raw.settings ?? emptyState.settings,
     im: raw.im ?? emptyState.im,
   }

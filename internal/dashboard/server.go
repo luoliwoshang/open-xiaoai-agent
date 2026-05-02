@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -29,6 +30,7 @@ type Server struct {
 		SnapshotConversations() []assistant.ConversationSnapshot
 		RuntimeStatus() assistant.RuntimeStatus
 		ResetConversationData() error
+		SubmitRecognizedText(text string) error
 	}
 	settings interface {
 		Snapshot() settings.Snapshot
@@ -58,6 +60,7 @@ func New(addr string, tasks *tasks.Manager, claude *complextask.Service, convers
 	SnapshotConversations() []assistant.ConversationSnapshot
 	RuntimeStatus() assistant.RuntimeStatus
 	ResetConversationData() error
+	SubmitRecognizedText(text string) error
 }, runtimeSettings interface {
 	Snapshot() settings.Snapshot
 	UpdateSessionWindowSeconds(seconds int) (settings.Snapshot, error)
@@ -93,6 +96,7 @@ func (s *Server) ListenAndServe() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/healthz", s.handleHealth)
 	mux.HandleFunc("/api/state", s.handleState)
+	mux.HandleFunc("/api/assistant/asr", s.handleAssistantASR)
 	mux.HandleFunc("/api/tasks/", s.handleTaskArtifactDownload)
 	mux.HandleFunc("/api/logs", s.handleLogs)
 	mux.HandleFunc("/api/settings", s.handleSettings)
@@ -261,6 +265,41 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+func (s *Server) handleAssistantASR(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.conversations == nil {
+		http.Error(w, "assistant is not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	var payload struct {
+		Text string `json:"text"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, fmt.Sprintf("decode assistant asr payload: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	err := s.conversations.SubmitRecognizedText(payload.Text)
+	switch {
+	case err == nil:
+		writeJSON(w, map[string]any{
+			"ok":   true,
+			"text": strings.TrimSpace(payload.Text),
+		})
+	case errors.Is(err, assistant.ErrVoiceChannelBusy):
+		http.Error(w, err.Error(), http.StatusConflict)
+	case errors.Is(err, assistant.ErrNoVoiceChannel), errors.Is(err, assistant.ErrNoConversationContext):
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+	default:
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	}
 }
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {

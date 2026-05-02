@@ -76,6 +76,7 @@ flowchart TD
 - 使用 `reply` 模型流式生成回复，并通过设备侧 TTS 播放
 - 管理轻量异步任务，并在合适的时候汇报任务结果
 - 提供独立的 React + Vite dashboard
+- Dashboard 支持手动把一段识别文本送入当前主流程，便于调试语音编排链路
 - 提供后端日志中心，可在管理界面分页查看 Go server 日志
 - 使用 MySQL 保存任务、会话和插件私有状态
 - 会话上下文默认使用滑动窗口，并支持在 Dashboard 中调整窗口秒数
@@ -191,10 +192,10 @@ npm run dev
 go run .
 ```
 
-如果只启动前端：
+如果只启动当前前端：
 
 ```sh
-npm run dev:web
+npm run dev:fe
 ```
 
 如果需要看数据库状态：
@@ -240,10 +241,10 @@ npm run dev:go
 npm run dev:web
 ```
 
-构建前端：
+构建当前前端：
 
 ```sh
-npm run build:web
+npm run build:fe
 ```
 
 更多后端参数可用 `go run . -h` 查看，常见的有 `-addr`、`-dashboard-addr`、`-abort-after-asr`、`-parallel-intent-chat`。数据库连接固定从 `config.yaml` 的 `database.dsn` 读取。
@@ -255,6 +256,7 @@ Go 后端只提供 API，前端位于 `web/`。
 - `GET /api/healthz`
 - `GET /api/logs`
 - `GET /api/state`
+- `POST /api/assistant/asr`
 - `GET /api/settings`
 - `POST /api/settings/session`
 - `POST /api/settings/im-delivery`

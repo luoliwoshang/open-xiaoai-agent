@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -13,6 +14,12 @@ import (
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugin"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/tasks"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/voice"
+)
+
+var (
+	ErrVoiceChannelBusy      = errors.New("assistant voice channel is busy")
+	ErrNoVoiceChannel        = errors.New("no recent voice channel is available")
+	ErrNoConversationContext = errors.New("no recent conversation context is available")
 )
 
 // IntentDecider 负责主流程里的“意图路由判断”。
@@ -157,6 +164,30 @@ func (s *Service) HandleUserText(historyKey string, channel voice.Channel, text 
 		defer s.finishVoiceTurn()
 		s.handleUserText(historyKey, channel, text)
 	}()
+}
+
+// SubmitRecognizedText 用于把一段“已经识别完成的用户文本”注入当前主流程。
+//
+// 这个入口主要给 dashboard 等调试入口使用：
+// - 它不会自己创建新的语音通道；
+// - 而是复用最近一次成功进入主流程的 historyKey 和 voice channel；
+// - 如果当前语音通道正忙，或者最近还没有可复用的通道/上下文，就返回明确错误。
+func (s *Service) SubmitRecognizedText(text string) error {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return errors.New("text is required")
+	}
+
+	historyKey, channel, err := s.tryBeginInjectedVoiceTurn()
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		defer s.finishVoiceTurn()
+		s.handleUserText(historyKey, channel, text)
+	}()
+	return nil
 }
 
 // TryDeliverTaskResultReports 在任务系统通知“有待汇报结果”时被调用。
@@ -543,6 +574,24 @@ func (s *Service) tryBeginVoiceTurn(historyKey string, channel voice.Channel) bo
 		s.lastHistoryKey = strings.TrimSpace(historyKey)
 	}
 	return true
+}
+
+func (s *Service) tryBeginInjectedVoiceTurn() (string, voice.Channel, error) {
+	s.runtimeMu.Lock()
+	defer s.runtimeMu.Unlock()
+
+	if s.busy {
+		return "", nil, ErrVoiceChannelBusy
+	}
+	if s.lastChannel == nil {
+		return "", nil, ErrNoVoiceChannel
+	}
+	if strings.TrimSpace(s.lastHistoryKey) == "" {
+		return "", nil, ErrNoConversationContext
+	}
+
+	s.busy = true
+	return s.lastHistoryKey, s.lastChannel, nil
 }
 
 func (s *Service) tryBeginResultReportTurn() (string, voice.Channel, bool) {

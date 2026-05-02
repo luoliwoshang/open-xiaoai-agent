@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { Cog, MessageSquare } from 'lucide-react'
-import type { DashboardState, WeChatLoginStart, WeChatLoginStatus } from '../../types'
+import type { DashboardState, WeChatLoginStart, WeChatLoginStatus } from '../types'
 import {
   saveSessionSettings,
   saveIMDeliverySettings,
@@ -39,7 +39,7 @@ export function SettingsPage({ state, onReload }: SettingsPageProps) {
   const [loginStatus, setLoginStatus] = useState<WeChatLoginStatus | null>(null)
   const loginPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const showToast = useCallback((msg: string, isError = false) => {
+  const showToast = useCallback((msg: string, _isError = false) => {
     setToast(msg)
     setTimeout(() => setToast(null), 3000)
   }, [])
