@@ -18,10 +18,14 @@ export function WeChatLoginPanel({
   const statusText: Record<string, string> = {
     pending: '等待扫码...',
     scanned: '已扫码，请确认登录',
-    confirmed: '已确认',
+    confirmed: '微信侧已确认，请确认添加账号',
     expired: '二维码已过期',
     failed: '登录失败',
   }
+  const canConfirm =
+    !!loginStatus?.candidate &&
+    loginStatus.status !== 'expired' &&
+    loginStatus.status !== 'failed'
 
   return (
     <div className="modal-overlay" onClick={onCancel}>
@@ -53,8 +57,8 @@ export function WeChatLoginPanel({
           )}
         </div>
         <div className="modal-actions">
-          {loginStatus?.status === 'scanned' && (
-            <button className="btn btn-primary" onClick={onConfirm}>确认登录</button>
+          {canConfirm && (
+            <button className="btn btn-primary" onClick={onConfirm}>确认添加账号</button>
           )}
           <button className="btn" onClick={onCancel}>取消</button>
         </div>

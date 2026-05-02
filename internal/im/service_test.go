@@ -134,7 +134,7 @@ func TestServiceUpdateDeliveryConfigPersistsSelection(t *testing.T) {
 func TestServiceConfirmWeChatLoginPersistsAccountAfterExplicitConfirmation(t *testing.T) {
 	t.Parallel()
 
-	service, _ := newTestService(t)
+	service, settingsStore := newTestService(t)
 
 	adapter := &stubAdapter{
 		loginResult: WeChatLoginResult{
@@ -190,6 +190,17 @@ func TestServiceConfirmWeChatLoginPersistsAccountAfterExplicitConfirmation(t *te
 	if len(targets) != 1 {
 		t.Fatalf("ListTargets() len = %d, want 1 auto-created owner target", len(targets))
 	}
+
+	snapshot := settingsStore.Snapshot()
+	if snapshot.IMSelectedAccountID != account.ID {
+		t.Fatalf("IMSelectedAccountID = %q, want %q", snapshot.IMSelectedAccountID, account.ID)
+	}
+	if snapshot.IMSelectedTargetID != targets[0].ID {
+		t.Fatalf("IMSelectedTargetID = %q, want %q", snapshot.IMSelectedTargetID, targets[0].ID)
+	}
+	if snapshot.IMDeliveryEnabled {
+		t.Fatal("IMDeliveryEnabled = true, want false")
+	}
 }
 
 func TestServiceSendTextToDefaultChannelUsesSavedSelectionEvenWhenMirrorDisabled(t *testing.T) {
@@ -227,6 +238,46 @@ func TestServiceSendTextToDefaultChannelUsesSavedSelectionEvenWhenMirrorDisabled
 	}
 	if adapter.sentCount() != 1 {
 		t.Fatalf("sentCount() = %d, want 1", adapter.sentCount())
+	}
+}
+
+func TestServiceSendTextToDefaultChannelFallsBackToSoleDefaultTarget(t *testing.T) {
+	t.Parallel()
+
+	service, settingsStore := newTestService(t)
+
+	adapter := &stubAdapter{}
+	service.adapters["stub"] = adapter
+
+	account, err := service.store.UpsertAccount("stub", "bot@im.bot", "user@im.wechat", "Bot", "https://example.com", "token")
+	if err != nil {
+		t.Fatalf("UpsertAccount() error = %v", err)
+	}
+	target, err := service.store.UpsertTarget(account.ID, "我的微信", "user@im.wechat", true)
+	if err != nil {
+		t.Fatalf("UpsertTarget() error = %v", err)
+	}
+
+	receipt, err := service.SendTextToDefaultChannel("调试消息")
+	if err != nil {
+		t.Fatalf("SendTextToDefaultChannel() error = %v", err)
+	}
+	if receipt.Account.ID != account.ID {
+		t.Fatalf("receipt.Account.ID = %q, want %q", receipt.Account.ID, account.ID)
+	}
+	if receipt.Target.ID != target.ID {
+		t.Fatalf("receipt.Target.ID = %q, want %q", receipt.Target.ID, target.ID)
+	}
+	if adapter.sentCount() != 1 {
+		t.Fatalf("sentCount() = %d, want 1", adapter.sentCount())
+	}
+
+	snapshot := settingsStore.Snapshot()
+	if snapshot.IMSelectedAccountID != account.ID {
+		t.Fatalf("IMSelectedAccountID = %q, want %q", snapshot.IMSelectedAccountID, account.ID)
+	}
+	if snapshot.IMSelectedTargetID != target.ID {
+		t.Fatalf("IMSelectedTargetID = %q, want %q", snapshot.IMSelectedTargetID, target.ID)
 	}
 }
 

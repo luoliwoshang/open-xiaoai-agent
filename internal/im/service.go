@@ -149,9 +149,11 @@ func (s *Service) ConfirmWeChatLogin(sessionKey string) (Account, error) {
 	if err != nil {
 		return Account{}, err
 	}
-	if _, err := s.store.EnsureOwnerTarget(account.ID, result.OwnerUserID); err != nil {
+	ownerTarget, err := s.store.EnsureOwnerTarget(account.ID, result.OwnerUserID)
+	if err != nil {
 		return Account{}, err
 	}
+	s.maybeSeedDefaultDeliverySelection(account.ID, ownerTarget.ID)
 	if err := s.store.AppendEvent(account.ID, "login", "微信账号登录成功"); err != nil {
 		log.Printf("append im login event failed: %v", err)
 	}
@@ -276,14 +278,14 @@ func (s *Service) SendTextToDefaultChannel(text string) (DeliveryReceipt, error)
 		return DeliveryReceipt{}, fmt.Errorf("debug text is required")
 	}
 
-	cfg := s.settings.Snapshot()
-	if strings.TrimSpace(cfg.IMSelectedAccountID) == "" || strings.TrimSpace(cfg.IMSelectedTargetID) == "" {
-		return DeliveryReceipt{}, fmt.Errorf("默认渠道尚未配置，请先保存账号和触达目标")
+	accountID, targetID, err := s.resolveDefaultDeliverySelection()
+	if err != nil {
+		return DeliveryReceipt{}, err
 	}
 
 	return s.deliverText(deliveryRequest{
-		AccountID: cfg.IMSelectedAccountID,
-		TargetID:  cfg.IMSelectedTargetID,
+		AccountID: accountID,
+		TargetID:  targetID,
 		Text:      text,
 	})
 }
@@ -293,16 +295,16 @@ func (s *Service) SendImageToDefaultChannel(req ImageSendRequest) (DeliveryRecei
 		return DeliveryReceipt{}, fmt.Errorf("im service is not configured")
 	}
 
-	cfg := s.settings.Snapshot()
-	if strings.TrimSpace(cfg.IMSelectedAccountID) == "" || strings.TrimSpace(cfg.IMSelectedTargetID) == "" {
-		return DeliveryReceipt{}, fmt.Errorf("默认渠道尚未配置，请先保存账号和触达目标")
+	accountID, targetID, err := s.resolveDefaultDeliverySelection()
+	if err != nil {
+		return DeliveryReceipt{}, err
 	}
 
 	prepared, err := s.mediaCache.StoreImage(req)
 	if err != nil {
 		return DeliveryReceipt{}, err
 	}
-	return s.deliverImage(cfg.IMSelectedAccountID, cfg.IMSelectedTargetID, prepared, req.Caption)
+	return s.deliverImage(accountID, targetID, prepared, req.Caption)
 }
 
 func (s *Service) SendFileToDefaultChannel(req FileSendRequest) (DeliveryReceipt, error) {
@@ -310,16 +312,16 @@ func (s *Service) SendFileToDefaultChannel(req FileSendRequest) (DeliveryReceipt
 		return DeliveryReceipt{}, fmt.Errorf("im service is not configured")
 	}
 
-	cfg := s.settings.Snapshot()
-	if strings.TrimSpace(cfg.IMSelectedAccountID) == "" || strings.TrimSpace(cfg.IMSelectedTargetID) == "" {
-		return DeliveryReceipt{}, fmt.Errorf("默认渠道尚未配置，请先保存账号和触达目标")
+	accountID, targetID, err := s.resolveDefaultDeliverySelection()
+	if err != nil {
+		return DeliveryReceipt{}, err
 	}
 
 	prepared, err := s.mediaCache.StoreFile(req)
 	if err != nil {
 		return DeliveryReceipt{}, err
 	}
-	return s.deliverFile(cfg.IMSelectedAccountID, cfg.IMSelectedTargetID, prepared, req.Caption)
+	return s.deliverFile(accountID, targetID, prepared, req.Caption)
 }
 
 func (s *Service) Reset() error {
@@ -540,6 +542,130 @@ func trimForEvent(text string) string {
 	}
 	runes := []rune(text)
 	return string(runes[:limit]) + "..."
+}
+
+func (s *Service) resolveDefaultDeliverySelection() (string, string, error) {
+	if s == nil || s.store == nil || s.settings == nil {
+		return "", "", fmt.Errorf("im service is not configured")
+	}
+
+	current := s.settings.Snapshot()
+	accountID := strings.TrimSpace(current.IMSelectedAccountID)
+	targetID := strings.TrimSpace(current.IMSelectedTargetID)
+	if accountID != "" && targetID != "" {
+		ok, err := s.deliverySelectionExists(accountID, targetID)
+		if err != nil {
+			return "", "", err
+		}
+		if ok {
+			return accountID, targetID, nil
+		}
+	}
+
+	account, target, ok, err := s.findFallbackDeliverySelection(accountID)
+	if err != nil {
+		return "", "", err
+	}
+	if !ok {
+		return "", "", fmt.Errorf("默认渠道尚未配置，请先保存账号和触达目标")
+	}
+
+	if _, err := s.settings.UpdateIMDelivery(false, account.ID, target.ID); err != nil {
+		log.Printf("persist fallback im delivery selection failed: account=%s target=%s err=%v", account.ID, target.ID, err)
+	}
+	return account.ID, target.ID, nil
+}
+
+func (s *Service) deliverySelectionExists(accountID string, targetID string) (bool, error) {
+	account, ok, err := s.store.GetAccount(strings.TrimSpace(accountID))
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, nil
+	}
+
+	target, ok, err := s.store.GetTarget(strings.TrimSpace(targetID))
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, nil
+	}
+	return target.AccountID == account.ID, nil
+}
+
+func (s *Service) findFallbackDeliverySelection(preferredAccountID string) (Account, Target, bool, error) {
+	accounts, err := s.store.ListAccounts()
+	if err != nil {
+		return Account{}, Target{}, false, err
+	}
+	targets, err := s.store.ListTargets()
+	if err != nil {
+		return Account{}, Target{}, false, err
+	}
+
+	preferredAccountID = strings.TrimSpace(preferredAccountID)
+	if preferredAccountID != "" {
+		for _, account := range accounts {
+			if account.ID != preferredAccountID {
+				continue
+			}
+			target, ok := chooseFallbackTargetForAccount(account.ID, targets)
+			if !ok {
+				return Account{}, Target{}, false, nil
+			}
+			return account, target, true, nil
+		}
+	}
+
+	if len(accounts) != 1 {
+		return Account{}, Target{}, false, nil
+	}
+	target, ok := chooseFallbackTargetForAccount(accounts[0].ID, targets)
+	if !ok {
+		return Account{}, Target{}, false, nil
+	}
+	return accounts[0], target, true, nil
+}
+
+func chooseFallbackTargetForAccount(accountID string, targets []Target) (Target, bool) {
+	var candidates []Target
+	for _, target := range targets {
+		if target.AccountID == strings.TrimSpace(accountID) {
+			candidates = append(candidates, target)
+		}
+	}
+	if len(candidates) == 0 {
+		return Target{}, false
+	}
+	for _, target := range candidates {
+		if target.IsDefault {
+			return target, true
+		}
+	}
+	if len(candidates) == 1 {
+		return candidates[0], true
+	}
+	return Target{}, false
+}
+
+func (s *Service) maybeSeedDefaultDeliverySelection(accountID string, targetID string) {
+	if s == nil || s.settings == nil {
+		return
+	}
+	if strings.TrimSpace(accountID) == "" || strings.TrimSpace(targetID) == "" {
+		return
+	}
+
+	current := s.settings.Snapshot()
+	if strings.TrimSpace(current.IMSelectedAccountID) != "" && strings.TrimSpace(current.IMSelectedTargetID) != "" {
+		return
+	}
+
+	if _, err := s.settings.UpdateIMDelivery(false, accountID, targetID); err != nil {
+		log.Printf("seed default im delivery selection failed: account=%s target=%s err=%v", accountID, targetID, err)
+	}
 }
 
 func (s *Service) getPendingWeChatLogin(sessionKey string) (WeChatLoginResult, bool) {

@@ -1,5 +1,5 @@
-import { useState, useRef } from 'react'
-import { Send, Image, FileUp } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Send, Image, FileUp, X } from 'lucide-react'
 
 interface IMDebugSendPanelProps {
   onSendText: (text: string) => Promise<void>
@@ -14,8 +14,32 @@ export function IMDebugSendPanel({ onSendText, onSendImage, onSendFile }: IMDebu
   const [text, setText] = useState('')
   const [caption, setCaption] = useState('')
   const [sending, setSending] = useState(false)
+  const [selectedImage, setSelectedImage] = useState<File | null>(null)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [imagePreviewUrl, setImagePreviewUrl] = useState('')
   const imageRef = useRef<HTMLInputElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!selectedImage) {
+      setImagePreviewUrl('')
+      return
+    }
+
+    const nextUrl = URL.createObjectURL(selectedImage)
+    setImagePreviewUrl(nextUrl)
+    return () => URL.revokeObjectURL(nextUrl)
+  }, [selectedImage])
+
+  const clearImage = () => {
+    setSelectedImage(null)
+    if (imageRef.current) imageRef.current.value = ''
+  }
+
+  const clearFile = () => {
+    setSelectedFile(null)
+    if (fileRef.current) fileRef.current.value = ''
+  }
 
   const handleSend = async () => {
     setSending(true)
@@ -24,17 +48,17 @@ export function IMDebugSendPanel({ onSendText, onSendImage, onSendFile }: IMDebu
         await onSendText(text)
         setText('')
       } else if (tab === 'image') {
-        const file = imageRef.current?.files?.[0]
+        const file = selectedImage
         if (file) {
           await onSendImage(file, caption || undefined)
-          if (imageRef.current) imageRef.current.value = ''
+          clearImage()
           setCaption('')
         }
       } else {
-        const file = fileRef.current?.files?.[0]
+        const file = selectedFile
         if (file) {
           await onSendFile(file, caption || undefined)
-          if (fileRef.current) fileRef.current.value = ''
+          clearFile()
           setCaption('')
         }
       }
@@ -79,13 +103,44 @@ export function IMDebugSendPanel({ onSendText, onSendImage, onSendFile }: IMDebu
         {tab === 'image' && (
           <>
             <div className="form-group">
-              <input ref={imageRef} type="file" accept="image/*" style={{ display: 'none' }} />
+              <input
+                ref={imageRef}
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={(event) => setSelectedImage(event.target.files?.[0] ?? null)}
+              />
               <div className="file-input-wrapper">
-                <button className="btn btn-sm" onClick={() => imageRef.current?.click()}>
+                <button className="btn btn-sm" type="button" onClick={() => imageRef.current?.click()}>
                   <Image /> 选择图片
                 </button>
+                <span className="debug-send-helper">
+                  {selectedImage ? '已选择 1 张图片' : '支持常见图片格式'}
+                </span>
               </div>
             </div>
+            {selectedImage && (
+              <div className="debug-preview-card">
+                <div className="debug-preview-image-shell">
+                  {imagePreviewUrl && (
+                    <img
+                      src={imagePreviewUrl}
+                      alt={selectedImage.name}
+                      className="debug-preview-image"
+                    />
+                  )}
+                </div>
+                <div className="debug-preview-meta">
+                  <div className="debug-preview-title">{selectedImage.name}</div>
+                  <div className="debug-preview-subtitle">
+                    图片已选中 · {formatFileSize(selectedImage.size)}
+                  </div>
+                </div>
+                <button className="debug-preview-clear" type="button" onClick={clearImage} aria-label="清除图片">
+                  <X />
+                </button>
+              </div>
+            )}
             <div className="form-group">
               <input
                 className="form-input"
@@ -100,13 +155,37 @@ export function IMDebugSendPanel({ onSendText, onSendImage, onSendFile }: IMDebu
         {tab === 'file' && (
           <>
             <div className="form-group">
-              <input ref={fileRef} type="file" style={{ display: 'none' }} />
+              <input
+                ref={fileRef}
+                type="file"
+                style={{ display: 'none' }}
+                onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
+              />
               <div className="file-input-wrapper">
-                <button className="btn btn-sm" onClick={() => fileRef.current?.click()}>
+                <button className="btn btn-sm" type="button" onClick={() => fileRef.current?.click()}>
                   <FileUp /> 选择文件
                 </button>
+                <span className="debug-send-helper">
+                  {selectedFile ? '已选择 1 个文件' : '选择后会显示文件信息'}
+                </span>
               </div>
             </div>
+            {selectedFile && (
+              <div className="debug-preview-card is-file">
+                <div className="debug-preview-file-icon">
+                  <FileUp />
+                </div>
+                <div className="debug-preview-meta">
+                  <div className="debug-preview-title">{selectedFile.name}</div>
+                  <div className="debug-preview-subtitle">
+                    文件已选中 · {formatFileSize(selectedFile.size)}
+                  </div>
+                </div>
+                <button className="debug-preview-clear" type="button" onClick={clearFile} aria-label="清除文件">
+                  <X />
+                </button>
+              </div>
+            )}
             <div className="form-group">
               <input
                 className="form-input"
@@ -125,4 +204,10 @@ export function IMDebugSendPanel({ onSendText, onSendImage, onSendFile }: IMDebu
       </div>
     </div>
   )
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
