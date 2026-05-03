@@ -466,22 +466,260 @@ func (m *Manager) GetArtifact(taskID string, artifactID string) (*Artifact, bool
 	return nil, false
 }
 
-func (m *Manager) updateTask(taskID string, mutator func(task *Task, events *[]Event)) error {
+// ListTaskArtifactDeliveries 返回给定任务下的“产物 + 交付状态”联合视图。
+//
+// 主流程在做任务结果汇报前，会先读取这份视图：
+// 1. 看看这次任务到底有没有产物；
+// 2. 看看这些产物当前是待发送、已发送、失败还是没有可用渠道；
+// 3. 再决定要不要先尝试发 IM，并把交付结果带进结果汇报 prompt。
+func (m *Manager) ListTaskArtifactDeliveries(taskIDs []string) []ArtifactDeliveryItem {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	matched := false
-	for i := range m.state.Tasks {
-		if taskID != "" && m.state.Tasks[i].ID != taskID {
+	taskSet := make(map[string]struct{}, len(taskIDs))
+	for _, taskID := range taskIDs {
+		taskID = strings.TrimSpace(taskID)
+		if taskID == "" {
 			continue
 		}
-		matched = true
-		mutator(&m.state.Tasks[i], &m.state.Events)
+		taskSet[taskID] = struct{}{}
 	}
-	if taskID != "" && !matched {
-		return fmt.Errorf("task %q not found", taskID)
+
+	if len(taskSet) == 0 {
+		return nil
+	}
+
+	artifactsByID := make(map[string]Artifact, len(m.state.Artifacts))
+	for _, artifact := range m.state.Artifacts {
+		if _, ok := taskSet[artifact.TaskID]; !ok {
+			continue
+		}
+		artifactsByID[artifact.ID] = artifact
+	}
+
+	items := make([]ArtifactDeliveryItem, 0, len(m.state.Deliveries))
+	for _, delivery := range m.state.Deliveries {
+		if _, ok := taskSet[delivery.TaskID]; !ok {
+			continue
+		}
+		artifact, ok := artifactsByID[delivery.ArtifactID]
+		if !ok {
+			continue
+		}
+		items = append(items, ArtifactDeliveryItem{
+			Delivery: delivery,
+			Artifact: artifact,
+		})
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Artifact.CreatedAt.Before(items[j].Artifact.CreatedAt)
+	})
+	return items
+}
+
+// MarkArtifactDeliveriesNoChannel 把一批产物交付记录标记为“当前没有可用渠道”。
+//
+// 这一步不会把 result_report_pending 清掉；它只负责把“产物暂时发不出去”的事实
+// 写回到任务产物交付记录里，方便后面的语音结果汇报自然带一句：
+// “现在还没有可用的渠道发送这些产物。”
+func (m *Manager) MarkArtifactDeliveriesNoChannel(ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		set[id] = struct{}{}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+
+	return m.updateState(func(state *fileState) error {
+		now := time.Now()
+		for i := range state.Deliveries {
+			delivery := &state.Deliveries[i]
+			if _, ok := set[delivery.ID]; !ok || delivery.Status == ArtifactDeliveryDelivered {
+				continue
+			}
+			if delivery.Status == ArtifactDeliveryNoChannel && strings.TrimSpace(delivery.LastError) == "当前没有可用的渠道发送产物" {
+				continue
+			}
+			artifact := findArtifactByID(state.Artifacts, delivery.ArtifactID)
+			task := findTaskByID(state.Tasks, delivery.TaskID)
+			if artifact == nil || task == nil {
+				continue
+			}
+			delivery.AccountID = ""
+			delivery.TargetID = ""
+			delivery.ChannelLabel = ""
+			delivery.ProviderMessageID = ""
+			delivery.LastError = "当前没有可用的渠道发送产物"
+			delivery.Status = ArtifactDeliveryNoChannel
+			delivery.UpdatedAt = now
+			task.UpdatedAt = now
+			state.Events = append(state.Events, Event{
+				ID:        m.nextID("event"),
+				TaskID:    delivery.TaskID,
+				Type:      "artifact_delivery_no_channel",
+				Message:   fmt.Sprintf("产物暂未发送：%s（当前没有可用的渠道）", artifact.FileName),
+				CreatedAt: now,
+			})
+		}
+		return nil
+	})
+}
+
+// MarkArtifactDeliveryDelivered 在单个产物发送成功后，写回成功状态和目标信息。
+func (m *Manager) MarkArtifactDeliveryDelivered(deliveryID string, accountID string, targetID string, channelLabel string, providerMessageID string) error {
+	deliveryID = strings.TrimSpace(deliveryID)
+	if deliveryID == "" {
+		return fmt.Errorf("artifact delivery id is required")
+	}
+
+	return m.updateState(func(state *fileState) error {
+		now := time.Now()
+		for i := range state.Deliveries {
+			delivery := &state.Deliveries[i]
+			if delivery.ID != deliveryID {
+				continue
+			}
+			artifact := findArtifactByID(state.Artifacts, delivery.ArtifactID)
+			task := findTaskByID(state.Tasks, delivery.TaskID)
+			if artifact == nil || task == nil {
+				return fmt.Errorf("artifact delivery %q is missing related task or artifact", deliveryID)
+			}
+			delivery.AccountID = strings.TrimSpace(accountID)
+			delivery.TargetID = strings.TrimSpace(targetID)
+			delivery.ChannelLabel = strings.TrimSpace(channelLabel)
+			delivery.ProviderMessageID = strings.TrimSpace(providerMessageID)
+			delivery.LastError = ""
+			delivery.Status = ArtifactDeliveryDelivered
+			delivery.UpdatedAt = now
+			delivery.DeliveredAt = now
+			task.UpdatedAt = now
+			state.Events = append(state.Events, Event{
+				ID:        m.nextID("event"),
+				TaskID:    delivery.TaskID,
+				Type:      "artifact_delivery_delivered",
+				Message:   fmt.Sprintf("产物已发送到%s：%s", fallbackDeliveryChannelLabel(delivery.ChannelLabel), artifact.FileName),
+				CreatedAt: now,
+			})
+			return nil
+		}
+		return fmt.Errorf("artifact delivery %q not found", deliveryID)
+	})
+}
+
+// MarkArtifactDeliveryFailed 在单个产物发送失败后，写回失败原因和当前目标信息。
+func (m *Manager) MarkArtifactDeliveryFailed(deliveryID string, accountID string, targetID string, channelLabel string, lastError string) error {
+	deliveryID = strings.TrimSpace(deliveryID)
+	if deliveryID == "" {
+		return fmt.Errorf("artifact delivery id is required")
+	}
+	lastError = strings.TrimSpace(lastError)
+	if lastError == "" {
+		lastError = "产物发送失败"
+	}
+
+	return m.updateState(func(state *fileState) error {
+		now := time.Now()
+		for i := range state.Deliveries {
+			delivery := &state.Deliveries[i]
+			if delivery.ID != deliveryID {
+				continue
+			}
+			artifact := findArtifactByID(state.Artifacts, delivery.ArtifactID)
+			task := findTaskByID(state.Tasks, delivery.TaskID)
+			if artifact == nil || task == nil {
+				return fmt.Errorf("artifact delivery %q is missing related task or artifact", deliveryID)
+			}
+			delivery.AccountID = strings.TrimSpace(accountID)
+			delivery.TargetID = strings.TrimSpace(targetID)
+			delivery.ChannelLabel = strings.TrimSpace(channelLabel)
+			delivery.ProviderMessageID = ""
+			delivery.LastError = lastError
+			delivery.Status = ArtifactDeliveryFailed
+			delivery.UpdatedAt = now
+			task.UpdatedAt = now
+			state.Events = append(state.Events, Event{
+				ID:        m.nextID("event"),
+				TaskID:    delivery.TaskID,
+				Type:      "artifact_delivery_failed",
+				Message:   fmt.Sprintf("产物发送失败：%s（%s）", artifact.FileName, lastError),
+				CreatedAt: now,
+			})
+			return nil
+		}
+		return fmt.Errorf("artifact delivery %q not found", deliveryID)
+	})
+}
+
+func (m *Manager) updateTask(taskID string, mutator func(task *Task, events *[]Event)) error {
+	return m.updateState(func(state *fileState) error {
+		matched := false
+		for i := range state.Tasks {
+			if taskID != "" && state.Tasks[i].ID != taskID {
+				continue
+			}
+			matched = true
+			mutator(&state.Tasks[i], &state.Events)
+		}
+		if taskID != "" && !matched {
+			return fmt.Errorf("task %q not found", taskID)
+		}
+		return nil
+	})
+}
+
+// updateState 是任务状态持久化的统一入口。
+//
+// 它的用途不是只给 task 主记录服务，而是：
+// - 更新任务主表快照；
+// - 更新任务事件流；
+// - 更新产物；
+// - 更新产物交付记录；
+//
+// 所有这些内存态修改完成后，都会在同一把锁里一次性落库，
+// 避免主流程看到“任务已经完成了，但交付记录还是旧的”这种半更新状态。
+func (m *Manager) updateState(mutator func(state *fileState) error) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if err := mutator(&m.state); err != nil {
+		return err
 	}
 	return m.store.Save(m.state)
+}
+
+func findTaskByID(tasks []Task, taskID string) *Task {
+	for i := range tasks {
+		if tasks[i].ID == taskID {
+			return &tasks[i]
+		}
+	}
+	return nil
+}
+
+func findArtifactByID(artifacts []Artifact, artifactID string) *Artifact {
+	for i := range artifacts {
+		if artifacts[i].ID == artifactID {
+			return &artifacts[i]
+		}
+	}
+	return nil
+}
+
+func fallbackDeliveryChannelLabel(label string) string {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return "通知渠道"
+	}
+	return label
 }
 
 func (m *Manager) latestActiveTaskLocked() *Task {
@@ -591,10 +829,6 @@ func (r reporter) PutArtifact(req plugin.PutArtifactRequest) (plugin.ArtifactRef
 	return r.manager.putArtifact(r.taskID, req)
 }
 
-func (r reporter) SetDeliverArtifacts(ids []string) error {
-	return r.manager.setDeliverArtifacts(r.taskID, ids)
-}
-
 func (m *Manager) putArtifact(taskID string, req plugin.PutArtifactRequest) (plugin.ArtifactRef, error) {
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" {
@@ -615,6 +849,14 @@ func (m *Manager) putArtifact(taskID string, req plugin.PutArtifactRequest) (plu
 		return plugin.ArtifactRef{}, err
 	}
 	artifact.CreatedAt = time.Now()
+	delivery := ArtifactDelivery{
+		ID:         m.nextID("artifact_delivery"),
+		TaskID:     taskID,
+		ArtifactID: artifact.ID,
+		Status:     ArtifactDeliveryPending,
+		CreatedAt:  artifact.CreatedAt,
+		UpdatedAt:  artifact.CreatedAt,
+	}
 
 	var opErr error
 	if err := m.updateTask(taskID, func(task *Task, events *[]Event) {
@@ -624,6 +866,7 @@ func (m *Manager) putArtifact(taskID string, req plugin.PutArtifactRequest) (plu
 		}
 		task.UpdatedAt = time.Now()
 		m.state.Artifacts = append(m.state.Artifacts, artifact)
+		m.state.Deliveries = append(m.state.Deliveries, delivery)
 		*events = append(*events, Event{
 			ID:        m.nextID("event"),
 			TaskID:    taskID,
@@ -648,57 +891,6 @@ func (m *Manager) putArtifact(taskID string, req plugin.PutArtifactRequest) (plu
 		MIMEType: artifact.MIMEType,
 		Size:     artifact.SizeBytes,
 	}, nil
-}
-
-func (m *Manager) setDeliverArtifacts(taskID string, ids []string) error {
-	taskID = strings.TrimSpace(taskID)
-	if taskID == "" {
-		return fmt.Errorf("task id is required")
-	}
-
-	normalized := make(map[string]struct{}, len(ids))
-	for _, id := range ids {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
-		normalized[id] = struct{}{}
-	}
-
-	var opErr error
-	if err := m.updateTask(taskID, func(task *Task, events *[]Event) {
-		if task.State != StateAccepted && task.State != StateRunning {
-			opErr = fmt.Errorf("task %q is not accepting deliver artifact updates", taskID)
-			return
-		}
-
-		available := make(map[string]struct{})
-		for i := range m.state.Artifacts {
-			if m.state.Artifacts[i].TaskID != taskID {
-				continue
-			}
-			available[m.state.Artifacts[i].ID] = struct{}{}
-		}
-		for id := range normalized {
-			if _, ok := available[id]; !ok {
-				opErr = fmt.Errorf("artifact %q does not belong to task %q", id, taskID)
-				return
-			}
-		}
-
-		for i := range m.state.Artifacts {
-			if m.state.Artifacts[i].TaskID != taskID {
-				continue
-			}
-			_, shouldDeliver := normalized[m.state.Artifacts[i].ID]
-			m.state.Artifacts[i].Deliver = shouldDeliver
-		}
-		task.UpdatedAt = time.Now()
-		_ = events
-	}); err != nil {
-		return err
-	}
-	return opErr
 }
 
 func summarizeResult(result string) string {

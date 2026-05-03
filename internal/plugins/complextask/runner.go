@@ -307,9 +307,6 @@ func (r *ClaudeRunner) importArtifacts(taskID string, reporter plugin.AsyncRepor
 	if len(deliverIDs) == 0 {
 		return nil
 	}
-	if err := reporter.SetDeliverArtifacts(deliverIDs); err != nil {
-		return fmt.Errorf("mark deliver artifacts: %w", err)
-	}
 	return reporter.Event("claude_artifacts", fmt.Sprintf("Claude 已登记 %d 个交付产物", len(deliverIDs)))
 }
 

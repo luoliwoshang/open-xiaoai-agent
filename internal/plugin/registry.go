@@ -42,7 +42,6 @@ type AsyncReporter interface {
 	Update(summary string) error
 	Event(eventType string, message string) error
 	PutArtifact(req PutArtifactRequest) (ArtifactRef, error)
-	SetDeliverArtifacts(ids []string) error
 }
 
 type AsyncTask struct {

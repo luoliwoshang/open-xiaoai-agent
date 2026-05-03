@@ -93,7 +93,7 @@ func (s *Store) Load() (fileState, error) {
 	}
 
 	artifactRows, err := s.db.Query(`
-		SELECT id, task_id, kind, file_name, mime_type, storage_path, size_bytes, deliver, created_at
+		SELECT id, task_id, kind, file_name, mime_type, storage_path, size_bytes, created_at
 		FROM task_artifacts
 	`)
 	if err != nil {
@@ -112,7 +112,6 @@ func (s *Store) Load() (fileState, error) {
 			&artifact.MIMEType,
 			&artifact.StoragePath,
 			&artifact.SizeBytes,
-			&artifact.Deliver,
 			&createdAt,
 		); err != nil {
 			return fileState{}, fmt.Errorf("scan task artifact row: %w", err)
@@ -122,6 +121,43 @@ func (s *Store) Load() (fileState, error) {
 	}
 	if err := artifactRows.Err(); err != nil {
 		return fileState{}, fmt.Errorf("iterate task artifact rows: %w", err)
+	}
+
+	deliveryRows, err := s.db.Query(`
+		SELECT id, task_id, artifact_id, account_id, target_id, channel_label, status, provider_message_id, last_error, created_at, updated_at, delivered_at
+		FROM task_artifact_deliveries
+	`)
+	if err != nil {
+		return fileState{}, fmt.Errorf("query task artifact deliveries: %w", err)
+	}
+	defer deliveryRows.Close()
+
+	for deliveryRows.Next() {
+		var delivery ArtifactDelivery
+		var createdAt, updatedAt, deliveredAt int64
+		if err := deliveryRows.Scan(
+			&delivery.ID,
+			&delivery.TaskID,
+			&delivery.ArtifactID,
+			&delivery.AccountID,
+			&delivery.TargetID,
+			&delivery.ChannelLabel,
+			&delivery.Status,
+			&delivery.ProviderMessageID,
+			&delivery.LastError,
+			&createdAt,
+			&updatedAt,
+			&deliveredAt,
+		); err != nil {
+			return fileState{}, fmt.Errorf("scan task artifact delivery row: %w", err)
+		}
+		delivery.CreatedAt = storage.TimeFromUnixMillis(createdAt)
+		delivery.UpdatedAt = storage.TimeFromUnixMillis(updatedAt)
+		delivery.DeliveredAt = storage.TimeFromUnixMillis(deliveredAt)
+		state.Deliveries = append(state.Deliveries, delivery)
+	}
+	if err := deliveryRows.Err(); err != nil {
+		return fileState{}, fmt.Errorf("iterate task artifact delivery rows: %w", err)
 	}
 
 	return state, nil
@@ -140,6 +176,9 @@ func (s *Store) Save(state fileState) error {
 
 	if _, err := tx.Exec(`DELETE FROM task_events`); err != nil {
 		return fmt.Errorf("clear task events: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM task_artifact_deliveries`); err != nil {
+		return fmt.Errorf("clear task artifact deliveries: %w", err)
 	}
 	if _, err := tx.Exec(`DELETE FROM task_artifacts`); err != nil {
 		return fmt.Errorf("clear task artifacts: %w", err)
@@ -198,8 +237,8 @@ func (s *Store) Save(state fileState) error {
 	}
 
 	artifactStmt, err := tx.Prepare(`
-		INSERT INTO task_artifacts (id, task_id, kind, file_name, mime_type, storage_path, size_bytes, deliver, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO task_artifacts (id, task_id, kind, file_name, mime_type, storage_path, size_bytes, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare task artifact insert: %w", err)
@@ -215,10 +254,37 @@ func (s *Store) Save(state fileState) error {
 			artifact.MIMEType,
 			artifact.StoragePath,
 			artifact.SizeBytes,
-			artifact.Deliver,
 			storage.UnixMillis(artifact.CreatedAt),
 		); err != nil {
 			return fmt.Errorf("insert task artifact %q: %w", artifact.ID, err)
+		}
+	}
+
+	deliveryStmt, err := tx.Prepare(`
+		INSERT INTO task_artifact_deliveries (id, task_id, artifact_id, account_id, target_id, channel_label, status, provider_message_id, last_error, created_at, updated_at, delivered_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare task artifact delivery insert: %w", err)
+	}
+	defer deliveryStmt.Close()
+
+	for _, delivery := range state.Deliveries {
+		if _, err := deliveryStmt.Exec(
+			delivery.ID,
+			delivery.TaskID,
+			delivery.ArtifactID,
+			delivery.AccountID,
+			delivery.TargetID,
+			delivery.ChannelLabel,
+			string(delivery.Status),
+			delivery.ProviderMessageID,
+			delivery.LastError,
+			storage.UnixMillis(delivery.CreatedAt),
+			storage.UnixMillis(delivery.UpdatedAt),
+			storage.UnixMillis(delivery.DeliveredAt),
+		); err != nil {
+			return fmt.Errorf("insert task artifact delivery %q: %w", delivery.ID, err)
 		}
 	}
 
@@ -241,6 +307,9 @@ func (s *Store) Reset() error {
 
 	if _, err := tx.Exec(`DELETE FROM task_events`); err != nil {
 		return fmt.Errorf("reset task events: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM task_artifact_deliveries`); err != nil {
+		return fmt.Errorf("reset task artifact deliveries: %w", err)
 	}
 	if _, err := tx.Exec(`DELETE FROM task_artifacts`); err != nil {
 		return fmt.Errorf("reset task artifacts: %w", err)

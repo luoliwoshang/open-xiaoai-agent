@@ -18,7 +18,6 @@ type fakeReporter struct {
 	updates     []string
 	events      []string
 	artifacts   []plugin.ArtifactRef
-	deliverIDs  []string
 	artifactSeq int
 }
 
@@ -56,11 +55,6 @@ func (f *fakeReporter) PutArtifact(req plugin.PutArtifactRequest) (plugin.Artifa
 	}
 	f.artifacts = append(f.artifacts, ref)
 	return ref, nil
-}
-
-func (f *fakeReporter) SetDeliverArtifacts(ids []string) error {
-	f.deliverIDs = append([]string(nil), ids...)
-	return nil
 }
 
 func TestStreamParserHandlesClaudeOutput(t *testing.T) {
@@ -237,9 +231,6 @@ func TestImportArtifactsFromManifest(t *testing.T) {
 	}
 	if reporter.artifacts[1].FileName != "README.txt" {
 		t.Fatalf("artifacts[1].FileName = %q", reporter.artifacts[1].FileName)
-	}
-	if len(reporter.deliverIDs) != 2 {
-		t.Fatalf("len(deliverIDs) = %d, want 2", len(reporter.deliverIDs))
 	}
 	if len(reporter.events) == 0 || reporter.events[len(reporter.events)-1] != "claude_artifacts:Claude 已登记 2 个交付产物" {
 		t.Fatalf("events = %#v", reporter.events)

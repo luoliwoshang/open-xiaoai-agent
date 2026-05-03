@@ -117,9 +117,24 @@ func ensureSchema(db *sql.DB) error {
 			mime_type VARCHAR(255) NOT NULL,
 			storage_path LONGTEXT NOT NULL,
 			size_bytes BIGINT NOT NULL,
-			deliver BOOLEAN NOT NULL DEFAULT FALSE,
 			created_at BIGINT NOT NULL,
 			INDEX idx_task_artifacts_task_id (task_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS task_artifact_deliveries (
+			id VARCHAR(255) PRIMARY KEY,
+			task_id VARCHAR(255) NOT NULL,
+			artifact_id VARCHAR(255) NOT NULL,
+			account_id VARCHAR(255) NOT NULL DEFAULT '',
+			target_id VARCHAR(255) NOT NULL DEFAULT '',
+			channel_label VARCHAR(255) NOT NULL DEFAULT '',
+			status VARCHAR(64) NOT NULL,
+			provider_message_id VARCHAR(255) NOT NULL DEFAULT '',
+			last_error LONGTEXT NOT NULL,
+			created_at BIGINT NOT NULL,
+			updated_at BIGINT NOT NULL,
+			delivered_at BIGINT NOT NULL DEFAULT 0,
+			UNIQUE KEY uniq_task_artifact_delivery_artifact (artifact_id),
+			INDEX idx_task_artifact_deliveries_task_id (task_id)
 		)`,
 		`CREATE TABLE IF NOT EXISTS conversations (
 			id VARCHAR(255) PRIMARY KEY,

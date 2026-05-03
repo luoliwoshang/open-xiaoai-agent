@@ -95,6 +95,7 @@ func main() {
 		plugins,
 		taskManager,
 		imService,
+		imService,
 	)
 	if err != nil {
 		log.Fatal(err)
