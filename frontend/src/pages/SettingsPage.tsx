@@ -106,8 +106,8 @@ export function SettingsPage({ state, onReload }: SettingsPageProps) {
   return (
     <div>
       <div className="page-header">
-        <h2>设置</h2>
-        <div className="page-header-sub">系统配置与 IM 网关</div>
+        <h2>调试设置</h2>
+        <div className="page-header-sub">调试主流程、语音上下文与 IM 网关配置</div>
       </div>
 
       <div className="settings-container">

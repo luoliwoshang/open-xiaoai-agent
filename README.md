@@ -75,12 +75,13 @@ flowchart TD
 - 使用 `intent` 模型判断普通聊天、工具调用或异步任务
 - 使用 `reply` 模型流式生成回复，并通过设备侧 TTS 播放
 - 管理轻量异步任务，并在合适的时候汇报任务结果
-- 提供独立的 React + Vite dashboard
+- 提供独立的 React + Vite Dashboard 调试控制台
+- Dashboard 的定位是调试与排障，不是面向普通用户的日常工作台
 - Dashboard 支持手动把一段识别文本送入服务端 debug 主流程；它与真实小爱入口共享主语音上下文，但不依赖真实设备在线
 - Dashboard 会展示当前小爱设备连接状况，方便确认 WebSocket client 是否在线
-- 提供后端日志中心，可在管理界面分页查看 Go server 日志
+- 提供后端日志中心，可在调试控制台里分页查看 Go server 日志
 - 使用 MySQL 保存任务、会话和插件私有状态
-- 会话上下文默认使用滑动窗口，并支持在 Dashboard 中调整窗口秒数
+- 会话上下文默认使用滑动窗口，并支持在 Dashboard 调试台中调整窗口秒数
 - 提供第一期独立 IM Gateway：支持微信扫码登录、确认添加账号、多账号管理、文本触达配置，以及默认渠道的文本 / 图片调试发送
 - 支持把小爱的正常回复异步镜像到选中的微信私聊目标，不阻塞设备侧播报
 
@@ -183,7 +184,7 @@ npm run dev
 
 - WebSocket server: `:4399`
 - Dashboard API: `:8090`
-- Web dashboard: `http://127.0.0.1:5173/#/`
+- Web debug dashboard: `http://127.0.0.1:5173/#/`
 - Settings page: `http://127.0.0.1:5173/#/settings`
 - Logs page: `http://127.0.0.1:5173/#/logs`
 

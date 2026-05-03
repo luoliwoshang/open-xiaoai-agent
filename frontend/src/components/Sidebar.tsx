@@ -9,16 +9,16 @@ interface SidebarProps {
 
 export function Sidebar({ page, assistant, xiaoai }: SidebarProps) {
   const navItems = [
-    { id: 'dashboard', label: '仪表盘', icon: LayoutDashboard },
-    { id: 'logs', label: '日志', icon: FileText },
-    { id: 'settings', label: '设置', icon: Settings },
+    { id: 'dashboard', label: '调试台', icon: LayoutDashboard },
+    { id: 'logs', label: '调试日志', icon: FileText },
+    { id: 'settings', label: '调试设置', icon: Settings },
   ]
 
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
         <h1>XiaoAi Agent</h1>
-        <div className="sidebar-brand-sub">dashboard</div>
+        <div className="sidebar-brand-sub">debug console</div>
       </div>
       <nav className="sidebar-nav">
         {navItems.map((item) => (

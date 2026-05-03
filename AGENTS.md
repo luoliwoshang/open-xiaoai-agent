@@ -26,7 +26,7 @@
 - 维护轻量异步任务系统
 - 提供一期 IM 网关能力：支持微信文本投递，以及默认渠道的图片 / 文件调试发送
 - 持久化后端运行日志，并通过 dashboard API 暴露出来
-- 通过 API + 前端工作区提供一个 React Dashboard
+- 通过 API + 前端工作区提供一个 React 调试 Dashboard
 
 当前非目标 / 已知缺失项：
 
@@ -506,6 +506,12 @@ Claude artifact handoff 规则：
 
 Go 只提供 dashboard API。
 
+Dashboard 的定位必须保持明确：
+
+- Dashboard 是调试与排障控制台
+- 它不是面向最终用户的日常操作台
+- 它的核心职责是运行态观察、手动调试注入、任务排查、产物 / 触达验证，以及日志辅助诊断
+
 重要路由：
 
 - `GET /api/healthz`
@@ -546,6 +552,7 @@ Go 只提供 dashboard API。
 - settings 应放在单独页面
 - 后端日志应放在独立页面，不应混入 `/api/state`
 - dashboard 应该有设计感，不能像通用后台模板
+- dashboard 的文案和信息架构也应强化“调试控制台”定位，而不是做成泛化的管理后台
 - dashboard 状态应暴露 assistant 语音通道运行时状态，例如 busy / result-report-ready / has-voice-channel
 - dashboard 首页可以提供一个手动 ASR-debug 输入入口，把识别文本注入当前 assistant 流程，使用共享的 `main-voice` 会话上下文和专用 debug voice channel
 - dashboard 还可以暴露当前 XiaoAI websocket 连接状态，方便操作者快速确认设备桥是否在线

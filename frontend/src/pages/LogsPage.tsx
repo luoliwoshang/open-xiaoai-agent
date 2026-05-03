@@ -45,9 +45,9 @@ export function LogsPage() {
   return (
     <div>
       <div className="page-header">
-        <h2>日志</h2>
+        <h2>调试日志</h2>
         <div className="page-header-sub">
-          {page === 1 ? '实时刷新中' : '自动刷新已暂停'}
+          {page === 1 ? '实时刷新中，用于运行排障' : '自动刷新已暂停'}
         </div>
       </div>
 

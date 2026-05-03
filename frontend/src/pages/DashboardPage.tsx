@@ -4,8 +4,8 @@ import type { DashboardState } from '../types'
 import { countByState, formatTime } from '../lib/dashboard'
 import { submitAssistantASR } from '../lib/api'
 import { TaskListPane } from '../components/dashboard/TaskListPane'
-import { TaskDetailPane } from '../components/dashboard/TaskDetailPane'
-import { TaskSideCards } from '../components/dashboard/TaskSideCards'
+import { RecentConversationPane } from '../components/dashboard/RecentConversationPane'
+import { TaskDetailModal } from '../components/dashboard/TaskDetailModal'
 
 interface DashboardPageProps {
   state: DashboardState
@@ -51,9 +51,9 @@ export function DashboardPage({ state, onReload }: DashboardPageProps) {
   return (
     <div>
       <div className="page-header">
-        <h2>仪表盘</h2>
+        <h2>调试台</h2>
         <div className="page-header-sub">
-          上次更新 {formatTime(state.tasks[0]?.updated_at || new Date().toISOString())}
+          调试主流程、观察任务与排查运行状态 · 上次更新 {formatTime(state.tasks[0]?.updated_at || new Date().toISOString())}
           {state.assistant.busy && ' · 执行中'}
         </div>
       </div>
@@ -97,7 +97,7 @@ export function DashboardPage({ state, onReload }: DashboardPageProps) {
         <div className="dashboard-inject-copy">
           <div className="dashboard-inject-eyebrow">VOICE DEBUG</div>
           <h3>手动送入一条识别文本</h3>
-          <p>这会在服务端创建一条 debug ASR 输入，直接送进主流程；它会共享主语音上下文，但不依赖真实小爱设备在线。</p>
+          <p>这是调试入口，不是普通用户对话入口。它会在服务端创建一条 debug ASR 输入，直接送进主流程；它会共享主语音上下文，但不依赖真实小爱设备在线。</p>
         </div>
         <form className="dashboard-inject-form" onSubmit={(event) => void handleASRSubmit(event)}>
           <textarea
@@ -135,15 +135,18 @@ export function DashboardPage({ state, onReload }: DashboardPageProps) {
           selectedId={selectedTaskId}
           onSelect={setSelectedTaskId}
         />
-        <TaskDetailPane task={selectedTask} />
-        <TaskSideCards
+        <RecentConversationPane conversations={state.conversations} />
+      </div>
+
+      {selectedTask && (
+        <TaskDetailModal
           task={selectedTask}
           events={state.events}
           artifacts={state.artifacts}
           claudeRecords={state.claude_records}
-          conversations={state.conversations}
+          onClose={() => setSelectedTaskId(null)}
         />
-      </div>
+      )}
     </div>
   )
 }
