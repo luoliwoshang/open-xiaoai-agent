@@ -22,7 +22,7 @@ const PROGRESS_STEPS = ['接收', '调度', '执行', '完成', '交付']
 export function TaskDetailPane({ task }: TaskDetailPaneProps) {
   if (!task) {
     return (
-      <div className="section-card">
+      <div className="section-card task-detail-card">
         <div className="section-card-body">
           <div className="task-detail-empty">
             <Cpu />
@@ -37,7 +37,7 @@ export function TaskDetailPane({ task }: TaskDetailPaneProps) {
   const stepIndex = Math.min(Math.floor(percent / 25), 4)
 
   return (
-    <div className="section-card">
+    <div className="section-card task-detail-card">
       <div className="task-detail-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
           <StatusBadge state={task.state} />
@@ -72,46 +72,48 @@ export function TaskDetailPane({ task }: TaskDetailPaneProps) {
         </div>
       </div>
 
-      <div className="progress-section">
-        <div className="progress-header">
-          <span className="progress-label">执行进度</span>
-          <span className="progress-percent">{percent}%</span>
+      <div className="task-detail-scroll">
+        <div className="progress-section">
+          <div className="progress-header">
+            <span className="progress-label">执行进度</span>
+            <span className="progress-percent">{percent}%</span>
+          </div>
+          <div className="progress-track">
+            <div className="progress-fill" style={{ width: `${percent}%` }} />
+          </div>
+          <div className="progress-steps">
+            {PROGRESS_STEPS.map((step, i) => (
+              <span
+                key={step}
+                className={`progress-step ${i < stepIndex ? 'done' : i === stepIndex ? 'active' : ''}`}
+              >
+                {step}
+              </span>
+            ))}
+          </div>
         </div>
-        <div className="progress-track">
-          <div className="progress-fill" style={{ width: `${percent}%` }} />
-        </div>
-        <div className="progress-steps">
-          {PROGRESS_STEPS.map((step, i) => (
-            <span
-              key={step}
-              className={`progress-step ${i < stepIndex ? 'done' : i === stepIndex ? 'active' : ''}`}
-            >
-              {step}
-            </span>
-          ))}
-        </div>
+
+        {task.input && (
+          <div className="task-detail-section">
+            <div className="task-detail-section-title">输入</div>
+            <div className="task-detail-section-content">{task.input}</div>
+          </div>
+        )}
+
+        {task.summary && (
+          <div className="task-detail-section">
+            <div className="task-detail-section-title">摘要</div>
+            <div className="task-detail-section-content">{task.summary}</div>
+          </div>
+        )}
+
+        {task.result && (
+          <div className="task-detail-section">
+            <div className="task-detail-section-title">结果</div>
+            <div className="task-detail-section-content">{task.result}</div>
+          </div>
+        )}
       </div>
-
-      {task.input && (
-        <div className="task-detail-section">
-          <div className="task-detail-section-title">输入</div>
-          <div className="task-detail-section-content">{task.input}</div>
-        </div>
-      )}
-
-      {task.summary && (
-        <div className="task-detail-section">
-          <div className="task-detail-section-title">摘要</div>
-          <div className="task-detail-section-content">{task.summary}</div>
-        </div>
-      )}
-
-      {task.result && (
-        <div className="task-detail-section">
-          <div className="task-detail-section-title">结果</div>
-          <div className="task-detail-section-content">{task.result}</div>
-        </div>
-      )}
     </div>
   )
 }

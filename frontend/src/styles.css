@@ -583,6 +583,16 @@ body {
   border-bottom: 1px solid var(--border-subtle);
 }
 
+.task-detail-card {
+  min-height: 0;
+}
+
+.task-detail-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .task-detail-title {
   font-size: 15px;
   font-weight: 600;
