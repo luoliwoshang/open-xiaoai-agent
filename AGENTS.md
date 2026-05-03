@@ -1,121 +1,121 @@
 # AGENTS.md
 
-This file captures the practical development context for `open-xiaoai-agent`, so future work in another workspace does not need to rediscover the current project state.
+这份文件用于记录 `open-xiaoai-agent` 当前实际可用的开发上下文，这样以后在其他工作区继续开发时，不需要重新摸索一遍项目现状。
 
-## Project Identity
+## 项目标识
 
-- Repository: `https://github.com/luoliwoshang/open-xiaoai-agent`
-- Upstream ecosystem reference: [`open-xiaoai`](https://github.com/idootop/open-xiaoai)
-- This project is the standalone server side for the `open-xiaoai` device/client flow.
-- It is not meant to depend on the `open-xiaoai` repo source tree anymore.
-- Current Go module path:
+- 仓库：`https://github.com/luoliwoshang/open-xiaoai-agent`
+- 上游生态参考：[`open-xiaoai`](https://github.com/idootop/open-xiaoai)
+- 这个项目是 `open-xiaoai` 设备 / client 流程背后的独立服务端。
+- 它不应该再依赖 `open-xiaoai` 仓库的源码树。
+- 当前 Go module 路径：
   - `github.com/luoliwoshang/open-xiaoai-agent`
 
-## What This Project Does
+## 这个项目是做什么的
 
-This is a standalone Agent Server prototype that sits behind an `open-xiaoai` client.
+这是一个挂在 `open-xiaoai` client 后面的独立 Agent Server 原型。
 
-Current responsibilities:
+当前职责：
 
-- receive final ASR text from the XiaoAI Rust client over WebSocket
-- accept dashboard-injected recognized text for assistant-flow debugging
-- optionally abort the original XiaoAI flow after ASR
-- run `intent` routing against tools / async tasks / task continuation
-- run `reply` generation for normal chat and tool-result summarization
-- drive local TTS playback on the device through the existing client protocol
-- maintain lightweight async tasks
-- provide phase-1 IM gateway capability for WeChat text delivery plus default-channel image/file debug send
-- persist backend runtime logs and expose them through the dashboard API
-- expose a React dashboard over API + frontend workspace
+- 通过 WebSocket 接收 XiaoAI Rust client 转发过来的最终 ASR 文本
+- 接收由 Dashboard 手动注入、用于调试 assistant 主流程的识别文本
+- 在 ASR 之后按需打断原始 XiaoAI 流程
+- 执行 `intent` 路由，分流到工具 / 异步任务 / 任务继续等路径
+- 生成普通对话回复，以及工具结果总结回复
+- 通过现有 client 协议驱动设备侧本地 TTS 播放
+- 维护轻量异步任务系统
+- 提供一期 IM 网关能力：支持微信文本投递，以及默认渠道的图片 / 文件调试发送
+- 持久化后端运行日志，并通过 dashboard API 暴露出来
+- 通过 API + 前端工作区提供一个 React Dashboard
 
-Current non-goals / known missing pieces:
+当前非目标 / 已知缺失项：
 
-- no IM inbound conversation handling yet
-- no automatic IM media mirror yet beyond text
-- no group routing in IM gateway yet
-- no proper voice interruption detection
-- some latency optimizations were intentionally not carried over from earlier experiments
-- persistence is MySQL-backed, not Redis / MQ
+- 还没有 IM 入站会话处理
+- 还没有文本之外的自动 IM 媒体镜像
+- 还没有 IM 网关的群路由
+- 还没有真正完善的语音打断检测
+- 之前一些关于延迟优化的实验性实现有意没有保留
+- 持久化目前使用的是 MySQL，不是 Redis / MQ
 
-## Tech Stack
+## 技术栈
 
 - Go `1.24.0`
 - React `19.x`
 - Vite `6.x`
 - TypeScript `5.8.x`
-- Node.js / npm for the web dashboard and concurrent dev runner
+- Node.js / npm 用于 web dashboard 和并发开发命令
 
-Go dependencies currently declared in `go.mod`:
+当前 `go.mod` 里声明的 Go 依赖：
 
 - `github.com/gorilla/websocket v1.5.3`
 - `gopkg.in/yaml.v3 v3.0.1`
 
-Frontend/runtime tooling from `package.json`:
+`package.json` 中的前端 / 运行时工具说明：
 
-- root workspace name: `open-xiaoai-agent`
-- uses `concurrently` to run Go and web together
-- active frontend workspace lives in `frontend/`
-- legacy `web/` still exists in the repo for transition, but new UI work should land in `frontend/`
+- 根 workspace 名称：`open-xiaoai-agent`
+- 使用 `concurrently` 同时跑 Go 和前端
+- 当前有效的前端工作区位于 `frontend/`
+- 旧的 `web/` 仍然保留在仓库中用于过渡，但新的 UI 工作应当落在 `frontend/`
 
-Important clarification:
+重要说明：
 
-- the frontend is `React + Vite`
-- it is not `Vue`
+- 前端是 `React + Vite`
+- 不是 `Vue`
 
-## Repository Layout
+## 仓库结构
 
-Only the high-signal parts are listed here.
+这里只列高信号目录与文件。
 
 - `main.go`
-  - application entrypoint
-  - wiring for config, tasks, plugins, Claude runner, dashboard, assistant
+  - 应用入口
+  - 负责 wiring：config、tasks、plugins、Claude runner、dashboard、assistant
 - `internal/assistant`
-  - main orchestration flow
-  - conversation history
-  - speculative reply handling
-  - task result report delivery
+  - 主编排流程
+  - 会话历史
+  - speculative reply 处理
+  - 任务结果汇报投递
 - `internal/llm`
   - OpenAI-compatible client
-  - intent recognizer
-  - reply generator
+  - intent 识别器
+  - reply 生成器
 - `internal/plugin`
-  - tool/async-task registry
+  - tool / async-task 注册中心
 - `internal/plugins`
-  - actual builtin tools
-  - each plugin lives in its own subdirectory
+  - 实际内置工具
+  - 每个 plugin 都在自己的子目录里
 - `internal/tasks`
-  - MySQL-backed task store and manager
+  - 基于 MySQL 的任务存储与管理器
 - `internal/server`
-  - WebSocket server / session / RPC protocol
+  - WebSocket server / session / RPC 协议
 - `internal/voice`
-  - generic voice-channel abstraction used by assistant
-  - stream speaker helper for chunked spoken playback
+  - assistant 使用的通用语音通道抽象
+  - 分块播报的 stream speaker helper
 - `internal/voice/xiaoai`
-  - current XiaoAI voice adapter implementation
+  - 当前 XiaoAI 语音适配实现
 - `internal/dashboard`
-  - API side for dashboard state
+  - dashboard 状态与接口的 API 侧实现
 - `internal/logs`
-  - backend runtime log persistence
-  - standard logger capture
-  - paginated log listing
+  - 后端运行日志持久化
+  - 标准 logger 捕获
+  - 分页日志读取
 - `internal/im`
-  - phase-1 IM gateway
-  - WeChat login / account / target / mirror delivery
+  - 一期 IM 网关
+  - 微信登录 / 账号 / 目标 / 镜像投递
 - `frontend/`
-  - current React dashboard workspace
+  - 当前 React dashboard 工作区
 - `web/`
-  - legacy dashboard workspace kept temporarily during transition
+  - 旧 dashboard 工作区，暂时保留用于迁移过渡
 
-## Runtime Commands
+## 运行命令
 
-Run both backend and frontend:
+同时启动后端和前端：
 
 ```sh
 npm install
 npm run dev
 ```
 
-Root scripts:
+根级脚本：
 
 - `npm run dev`
 - `npm run dev:go`
@@ -125,39 +125,39 @@ Root scripts:
 - `npm run build:web`
 - `npm run preview:web`
 
-Run only backend directly:
+只直接跑后端：
 
 ```sh
 go run .
 ```
 
-Common backend flags from `main.go`:
+`main.go` 当前常用后端参数：
 
 - `-addr`
-  - default `:4399`
+  - 默认 `:4399`
 - `-dashboard-addr`
-  - default `:8090`
+  - 默认 `:8090`
 - `-claude-cwd`
-  - working directory for Claude CLI tasks
+  - Claude CLI 任务的工作目录
 - `-debug`
 - `-abort-after-asr`
-  - default `true`
+  - 默认 `true`
 - `-post-abort-delay`
-  - default `0`
+  - 默认 `0`
 - `-parallel-intent-chat`
-  - default `true`
+  - 默认 `true`
 
-## Configuration Files
+## 配置文件
 
 - `SOUL.md`
-  - persona/system flavor for the main reply model
+  - 主回复模型的人设 / 系统风格
 - `config.example.yaml`
-  - committed example config
+  - 提交到仓库中的示例配置
 - `config.yaml`
-  - local real config
-  - ignored by git because it may contain secrets
+  - 本地真实配置
+  - 已被 git ignore，因为它可能包含密钥
 
-Config domains currently used:
+当前使用到的配置域：
 
 - `database.dsn`
 - `task.artifact_cache_dir`
@@ -167,182 +167,182 @@ Config domains currently used:
 - `amap.api_key`
 - `im.media_cache_dir`
 
-Important:
+重要说明：
 
-- `config.yaml` is intentionally ignored
-- do not commit real API keys
-- runtime database config is sourced only from `config.yaml` field `database.dsn`
+- `config.yaml` 故意被忽略
+- 不要提交真实 API key
+- 运行时数据库配置只从 `config.yaml` 的 `database.dsn` 读取
 
-## Persistent State
+## 持久化状态
 
-This project currently uses MySQL persistence.
+当前项目使用 MySQL 做持久化。
 
-Logical stores:
+逻辑上的存储分类：
 
-- generic async task records + task events
-- task artifact metadata
-- sliding-window conversation history
-- Claude plugin private state
-- runtime settings such as `session.window_seconds`
-- backend runtime logs
-- IM gateway accounts / targets / events
+- 通用异步任务记录 + 任务事件
+- 任务 artifact 元数据
+- 滑动窗口会话历史
+- Claude plugin 私有状态
+- 运行时设置，例如 `session.window_seconds`
+- 后端运行日志
+- IM 网关账号 / 目标 / 事件
 
-### Meaning of Each Store
+### 各类存储的含义
 
-Generic task store:
+通用任务存储：
 
-- generic task table
-- generic task events
-- task artifact table
-- does not store plugin-specific execution internals such as Claude session ids
+- 通用任务表
+- 通用任务事件
+- 任务 artifact 表
+- 不存执行器私有内部状态，例如 Claude session id
 
-Task artifact cache:
+任务 artifact 缓存：
 
-- task-produced files are cached on local disk
-- cache directory comes from `config.yaml` field `task.artifact_cache_dir`
-- current default is `.cache/task-artifacts` under the repo root
-- plugins report artifact content and metadata, not raw local file paths across the task-system boundary
+- 任务产出的文件缓存于本地磁盘
+- 缓存目录来自 `config.yaml` 的 `task.artifact_cache_dir`
+- 当前默认值是仓库根目录下的 `.cache/task-artifacts`
+- plugin 对任务系统上报的是 artifact 内容和元数据，不会把裸本地路径跨边界传递
 
-Conversation store:
+会话存储：
 
-- persistent conversation windows used by `intent` and `reply`
-- current main voice flow uses a shared conversation key `main-voice`
-- both real XiaoAI ASR and dashboard debug ASR write into that same main voice conversation window
-- conversation windows still expire by `last_active + session.window_seconds`
+- 持久化的会话窗口，供 `intent` 和 `reply` 复用
+- 当前主语音流程使用统一的会话键 `main-voice`
+- 真实 XiaoAI ASR 和 dashboard 调试 ASR 都写进这同一段主语音会话
+- 会话窗口仍然按 `last_active + session.window_seconds` 过期
 
-Runtime settings store:
+运行时设置存储：
 
-- small key/value runtime settings persisted in MySQL
-- currently used for:
+- 存在 MySQL 中的小型 key/value 运行时设置
+- 当前主要用于：
   - `session.window_seconds`
   - `im.delivery.enabled`
   - `im.delivery.selected_account_id`
   - `im.delivery.selected_target_id`
-- service startup is expected to ensure default settings rows exist
+- 服务启动时应确保默认设置行存在
 
-IM gateway store:
+IM 网关存储：
 
-- phase-1 WeChat gateway state persisted in MySQL
-- includes:
-  - logged-in IM accounts
-  - default text delivery targets
-  - recent IM gateway events
-- current scope is text delivery plus default-channel image/file debug send
+- 一期微信网关状态持久化在 MySQL
+- 内容包括：
+  - 已登录 IM 账号
+  - 默认文本投递目标
+  - 最近 IM 网关事件
+- 当前范围是文本投递，以及默认渠道的图片 / 文件调试发送
 
-Media cache:
+媒体缓存：
 
-- uploaded IM debug images/files are cached on local disk before adapter delivery
-- cache directory comes from `config.yaml` field `im.media_cache_dir`
-- current default is `.cache/im-media` under the repo root
-- files are intentionally not auto-cleaned yet
+- 上传到 IM 调试发送的图片 / 文件，在适配层投递前会先缓存到本地磁盘
+- 缓存目录来自 `config.yaml` 的 `im.media_cache_dir`
+- 当前默认值是仓库根目录下的 `.cache/im-media`
+- 这些文件目前不会自动清理
 
-Runtime log store:
+运行日志存储：
 
-- backend standard logger output is persisted to MySQL
-- each log row keeps:
-  - timestamp
-  - inferred level
-  - source file/line when available
-  - parsed message
-  - raw formatted line
-- dashboard reads logs through a dedicated paginated API
+- 后端标准 logger 输出会被持久化到 MySQL
+- 每条日志行会保留：
+  - 时间戳
+  - 推断出的等级
+  - 文件 / 行号（如果能拿到）
+  - 解析后的 message
+  - 原始格式化日志行
+- dashboard 通过专门的分页 API 读取这些日志
 
-Claude-private store:
+Claude 私有存储：
 
-- plugin-private storage
-- maps the project task id to Claude-specific state such as:
+- plugin 私有存储
+- 用来把项目任务 id 映射到 Claude 私有状态，例如：
   - Claude `session_id`
   - prompt
   - last summary
   - last assistant text
   - result
 
-This separation is intentional:
+这个拆分是刻意设计的：
 
-- main task storage remains generic
-- plugin-specific continuation state stays inside the plugin
+- 主任务存储保持通用
+- plugin 特有的 continuation 状态留在 plugin 内部
 
-The current dashboard API also provides a reset endpoint that clears runtime state:
+当前 dashboard API 还提供了一个会清空运行时状态的 reset 接口：
 
 - `POST /api/reset`
 
-## Conversation Model
+## 会话模型
 
-Conversation history is persisted and reused.
+会话历史会被持久化并复用。
 
-Current rule:
+当前规则：
 
-- conversation reuse is based on a sliding window
-- the shared main voice conversation stays active while `last_active + session.window_seconds` has not expired
-- current default is `300` seconds, and it can be adjusted through the dashboard settings API
+- 会话复用基于滑动窗口
+- 共享的主语音会话只要 `last_active + session.window_seconds` 没过期就保持活跃
+- 当前默认值是 `300` 秒，并且可以通过 dashboard settings API 调整
 
-What gets written:
+会写入会话历史的内容：
 
-- user input
-- assistant replies
-- async task notices after they are actually spoken
+- 用户输入
+- assistant 回复
+- 异步任务通知在真正播报成功之后的文本
 
-What this means:
+这意味着：
 
-- future `intent` calls see recent history
-- future `reply` calls see recent history
-- task result reports become part of history after playback succeeds
+- 未来的 `intent` 调用能看到最近历史
+- 未来的 `reply` 调用能看到最近历史
+- 任务结果汇报在播报成功后也会进入历史
 
-## Device / XiaoAI Flow
+## 设备 / XiaoAI 流程
 
-Current assumed flow:
+当前假定的流程：
 
-1. user wakes original XiaoAI
-2. original XiaoAI does ASR
-3. Rust client forwards `SpeechRecognizer.RecognizeResult`
-4. backend wraps the XiaoAI connection into a voice-channel adapter
-5. backend optionally interrupts the native voice flow as part of playback preparation
-6. backend handles routing + reply/tool/task logic
-7. TTS is played back through the selected voice channel
+1. 用户唤醒原始 XiaoAI
+2. 原始 XiaoAI 完成 ASR
+3. Rust client 转发 `SpeechRecognizer.RecognizeResult`
+4. 后端把 XiaoAI 连接包装成 voice-channel adapter
+5. 后端在播放准备阶段按需打断原生语音流程
+6. 后端执行 routing + reply/tool/task 逻辑
+7. TTS 通过选定的语音通道回放
 
-Current voice-turn scheduling rule:
+当前语音轮次调度规则：
 
-- only one voice-producing assistant flow should run at a time
-- if a new ASR arrives while another voice turn is still running, the new ASR is ignored
-- async task result reports share the same single voice channel and only play when that channel is idle
+- 同一时刻只允许一条会发声的 assistant 流程运行
+- 如果上一条语音轮次还没结束时来了新的 ASR，新 ASR 会被忽略
+- 异步任务结果汇报与普通主流程共用同一条语音通道，只会在通道空闲时播放
 
-The project still fundamentally reuses:
+这个项目目前仍然本质复用：
 
-- XiaoAI wakeup + ASR path
-- the current XiaoAI/open-xiaoai voice adapter path
+- XiaoAI 唤醒 + ASR 链路
+- 当前 XiaoAI / open-xiaoai 语音适配链路
 
-Voice abstraction note:
+关于语音抽象的重要说明：
 
-- assistant main flow now targets a generic voice channel instead of depending directly on `*server.Session`
-- `HandleUserText(historyKey, channel, text)` is the main text-entrypoint inside assistant
-- XiaoAI-specific playback details such as daemon restart and `tts_play.sh` live inside `internal/voice/xiaoai`
+- assistant 主流程现在面向的是通用 voice channel，不再直接依赖 `*server.Session`
+- `HandleUserText(historyKey, channel, text)` 是 assistant 内部主文本入口
+- XiaoAI 专属的播放细节，例如 daemon restart 和 `tts_play.sh`，都放在 `internal/voice/xiaoai`
 
-## Intent / Reply Behavior
+## Intent / Reply 行为
 
-Intent stage:
+Intent 阶段：
 
-- non-streaming
-- tool-aware
-- can see recent conversation history
-- can see recent completed tasks for `continue_task` style routing
+- 非流式
+- 感知工具定义
+- 能看到最近会话历史
+- 能看到最近已完成任务，用于 `continue_task` 风格的路由
 
-Reply stage:
+Reply 阶段：
 
-- streaming
-- used for normal chat
-- used for summarizing ordinary tool outputs
-- used for task result reports
+- 流式
+- 用于普通聊天
+- 用于整理普通工具输出
+- 用于任务结果汇报
 
-Speculative behavior:
+Speculative 行为：
 
-- `intent` and `reply` can run in parallel
-- if no tool is selected, the speculative reply is reused
+- `intent` 和 `reply` 可以并行执行
+- 如果最终没有选中工具，就会复用 speculative reply 的结果
 
-## Builtin Plugins
+## 内置 Plugins
 
-Plugins are registered through `internal/plugins/register.go`.
+Plugins 通过 `internal/plugins/register.go` 注册。
 
-Current builtin tools include:
+当前内置工具包括：
 
 - `continue_chat`
 - `ask_weather`
@@ -353,25 +353,25 @@ Current builtin tools include:
 - `cancel_task`
 - `continue_task`
 
-Each plugin should stay inside its own subdirectory. This was an explicit design decision.
+每个 plugin 都应该保持在自己的子目录里。这是一个明确做过的设计决策。
 
-### Tool Output Modes
+### 工具输出模式
 
-The plugin system supports different output modes. The most important practical distinction:
+plugin 系统支持不同的输出模式。当前最重要的实际区分是：
 
 - direct output
-- run through reply model
+- 交给 reply model 整理后输出
 - async task acceptance
 
-Default expectation for ordinary tools:
+对普通工具的默认预期：
 
-- tool result is usually fed back through the reply model rather than spoken raw
+- 工具结果通常会再经过 reply model 整理，而不是原样直接播报
 
-## Async Task Model
+## 异步任务模型
 
-The async task system is deliberately small.
+异步任务系统刻意保持得比较小。
 
-Current task states:
+当前任务状态：
 
 - `accepted`
 - `running`
@@ -379,7 +379,7 @@ Current task states:
 - `failed`
 - `canceled`
 
-Task records contain generic fields such as:
+任务记录包含的通用字段有：
 
 - `id`
 - `plugin`
@@ -391,122 +391,122 @@ Task records contain generic fields such as:
 - `summary`
 - `result`
 - `result_report_pending`
-- timestamps
+- 时间戳
 
-Task artifacts are intentionally separate from the task row:
+任务 artifact 故意与任务主行分开：
 
-- artifacts belong to the current `task_id`
-- current phase does not build parent/root task artifact aggregation views
-- once a task reaches `completed`, it should not accept new artifacts
-- plugins can mark which artifacts are intended for later delivery without introducing delivery-status tracking yet
+- artifact 归属于当前 `task_id`
+- 当前阶段不构建 parent/root task 的 artifact 聚合视图
+- 任务一旦进入 `completed`，就不应再接受新的 artifact
+- plugin 可以标记哪些 artifact 以后是要投递的，但暂时不引入 delivery-status tracking
 
-Important behavioral decisions:
+重要行为决策：
 
-- async task completion marks `result_report_pending=true`
-- when the voice channel is idle and the assistant still has a usable session, the task result report can be proactively spoken
-- if the assistant is currently handling another voice turn, the task result report stays waiting-to-report and is retried after the current turn finishes
-- the task result report is generated by the reply model from structured task data
-- the system should not mechanically read task titles like “xxx 已经完成了”
+- 异步任务完成后会设置 `result_report_pending=true`
+- 当语音通道空闲且 assistant 仍然持有可用 session 时，任务结果汇报可以被主动播报
+- 如果 assistant 当前正在处理另一轮语音主流程，任务结果汇报会保持 waiting-to-report，等当前轮次结束后再重试
+- 任务结果汇报由 reply model 基于结构化任务数据生成
+- 系统不应该机械地照读诸如“xxx 已经完成了”这种标题
 
-### Query Task Progress
+### 查询任务进度
 
-This area was iterated multiple times.
+这个区域经过多轮迭代。
 
-Current expectation:
+当前预期：
 
-- task progress should include:
-  - title
-  - real task state
-  - current summary
-- not just summary alone
+- 任务进度应该至少包含：
+  - 标题
+  - 真实任务状态
+  - 当前 summary
+- 而不只是 summary 本身
 
-This was changed because summaries could say something “sounds done” before the actual task state transitioned to completed.
+这样改是因为有些 summary 会“听起来像做完了”，但实际任务状态还没切到 completed。
 
-## Claude Code Async Executor
+## Claude Code 异步执行器
 
-`complex_task` currently uses Claude Code CLI as one async executor.
+当前 `complex_task` 使用 Claude Code CLI 作为异步执行器之一。
 
-Typical command shape:
+典型命令形式：
 
 ```sh
 claude --dangerously-skip-permissions --print --output-format stream-json --verbose "<task>"
 ```
 
-Continuation shape:
+继续执行的形式：
 
 ```sh
 claude --dangerously-skip-permissions --resume "<session_id>" --print --output-format stream-json --verbose "<follow-up request>"
 ```
 
-### Claude Runner Behavior
+### Claude Runner 行为
 
-Implemented behavior:
+已实现行为：
 
-- parses stream-json line by line
-- captures `system/init` for `session_id`
-- captures assistant text
-- captures final result
-- after Claude exits successfully, can import task artifacts from a manifest index file
-- stores Claude-private state in the Claude-private MySQL store
+- 按行解析 stream-json
+- 从 `system/init` 中提取 `session_id`
+- 捕获 assistant 文本
+- 捕获最终结果
+- Claude 成功退出后，可以从 manifest 索引文件导入任务 artifacts
+- Claude 私有状态存入 Claude-private MySQL store
 
-Prompt shaping rules currently enforced for new Claude tasks:
+当前对新 Claude 任务的 prompt shaping 规则：
 
-- prefix with “执行以下任务：...”
-- ask for short progress updates
-- avoid weird symbols / markdown noise in progress
-- user-facing progress/final summaries should avoid workdir paths, manifest paths, terminal commands, and other executor-internal details
-- user-facing wording should stay plain and understandable for ordinary users, not overly professional or verbose
-- if Claude needs to hand files back to the system, it should write a manifest index file under `.open-xiaoai-agent/artifacts/<task_id>.json`
-- final summary should still be concise and TTS-friendly
+- 前缀固定加上“执行以下任务：...”
+- 要求给出简短的进度更新
+- 避免进度里出现奇怪符号或 markdown 噪音
+- 面向用户的进度 / 最终摘要不应出现 workdir 路径、manifest 路径、终端命令以及其他执行器内部细节
+- 面向用户的措辞应保持朴素、普通用户可理解，不要过度专业或冗长
+- 如果 Claude 需要把文件交还给系统，应在 `.open-xiaoai-agent/artifacts/<task_id>.json` 下写一个 manifest 索引文件
+- 最终摘要仍应保持简洁且适合 TTS
 
-Claude artifact handoff rule:
+Claude artifact handoff 规则：
 
-- the manifest file is only an index of deliverable file locations and metadata
-- the Claude adapter reads those local files and calls the generic task artifact APIs
-- raw local paths do not cross the task-system boundary
+- manifest 文件本身只是一个可交付文件位置与元数据的索引
+- Claude adapter 会读取这些本地文件，并调用通用任务 artifact API
+- 原始本地路径不会跨过任务系统边界
 
 ### Resume / Continue Task
 
-Task continuation is intentionally plugin-owned, not global.
+任务 continuation 是 plugin 自己负责的，而不是全局统一实现。
 
-Meaning:
+含义是：
 
-- the main task table stores `plugin` and generic task info
-- when continuing a task:
-  - routing finds a completed task
-  - the plugin is identified from the task record
-  - the plugin looks up its own private state
-  - the plugin retrieves its own Claude `session_id`
-  - the plugin resumes work
+- 主任务表只保存 `plugin` 和通用任务信息
+- 当继续一个任务时：
+  - 路由先找到一个已完成任务
+  - 从任务记录里识别 plugin
+  - 由 plugin 读取自己的私有状态
+  - plugin 再取出自己的 Claude `session_id`
+  - 然后继续执行
 
-This is important:
+这点非常重要：
 
-- `session_id` is not stored in the main task table
-- plugin-private execution state should not be shared across plugins
+- `session_id` 不会存到主任务表
+- plugin 私有执行状态不能在 plugins 之间共享
 
-Current continuation behavior:
+当前 continuation 行为：
 
-- continuing a task creates a new task row
-- `parent_task_id` links it back to the original task
-- it does not overwrite the old task
+- 继续任务时会新建一条任务行
+- 用 `parent_task_id` 把它关联回原任务
+- 不会覆盖旧任务
 
-## Weather Integration
+## 天气集成
 
-Weather is backed by Gaode / AMap.
+天气能力接的是高德 / AMap。
 
-Important details:
+重要细节：
 
-- the public tool input remains a human city name
-- internally the weather plugin resolves the city to an `adcode`
-- the generated city/adcode mapping was derived from the provided AMap Excel file
-- the generated mapping lives in:
+- 对外公开的工具输入仍然是人类城市名
+- weather plugin 内部会把城市解析成 `adcode`
+- 当前生成的 city/adcode 映射来自提供的 AMap Excel 文件
+- 生成后的映射位于：
   - `internal/plugins/weather/adcodes_gen.go`
 
 ## Dashboard / Frontend
 
-Go provides the dashboard API only.
+Go 只提供 dashboard API。
 
-Important routes:
+重要路由：
 
 - `GET /api/healthz`
 - `GET /api/logs`
@@ -529,100 +529,100 @@ Important routes:
 - `POST /api/im/accounts/delete`
 - `POST /api/reset`
 
-Important behavior:
+重要行为：
 
-- `POST /api/assistant/asr` is a server-side debug ASR injection entrypoint
-- it does not require a live XiaoAI device connection
-- it shares the same `main-voice` conversation context as the real XiaoAI entrypoint
-- it uses a dedicated debug voice channel while still obeying the assistant busy gate
+- `POST /api/assistant/asr` 是服务端侧的 debug ASR 注入入口
+- 它不依赖实时 XiaoAI 设备连接
+- 它与真实 XiaoAI 入口共享同一段 `main-voice` 会话上下文
+- 它使用一条专用 debug voice channel，但仍遵守 assistant 的 busy gate
 
-The frontend is separate and should stay that way.
+前端应保持独立，不要和后端重新耦合。
 
-UI decisions that were explicitly requested:
+明确提出过的 UI 决策：
 
-- conversation history should not be visually mixed with task event flow
-- task event flow belongs to a selected task
-- conversation history is shown separately
-- settings should live on a separate settings page
-- backend logs should live on their own page and not be mixed into `/api/state`
-- dashboard should feel intentional, not generic admin boilerplate
-- dashboard state should expose assistant voice-channel runtime status such as busy / result-report-ready / has-voice-channel
-- dashboard homepage can provide a manual ASR-debug input that injects recognized text into the current assistant flow using the shared `main-voice` conversation context and a dedicated debug voice channel
-- dashboard can expose the current XiaoAI websocket connection status so operators can quickly confirm whether a device bridge is online
+- 会话历史不应在视觉上和任务事件流混在一起
+- 任务事件流属于被选中的某个任务
+- 会话历史应单独显示
+- settings 应放在单独页面
+- 后端日志应放在独立页面，不应混入 `/api/state`
+- dashboard 应该有设计感，不能像通用后台模板
+- dashboard 状态应暴露 assistant 语音通道运行时状态，例如 busy / result-report-ready / has-voice-channel
+- dashboard 首页可以提供一个手动 ASR-debug 输入入口，把识别文本注入当前 assistant 流程，使用共享的 `main-voice` 会话上下文和专用 debug voice channel
+- dashboard 还可以暴露当前 XiaoAI websocket 连接状态，方便操作者快速确认设备桥是否在线
 
-## Frontend UI Style
+## 前端 UI 风格
 
-When modifying XiaoAiAgent frontend pages, always follow the project UI style guide:
+修改 XiaoAiAgent 前端页面时，必须遵守项目 UI 风格指南：
 
-- see `docs/frontend-ui-style-guide.md`
-- keep the cute, bright, modern SaaS dashboard style
-- preserve the blue / purple / mint color direction
-- use rounded cards, soft shadows, readable Chinese UI, and light mascot-style decoration
-- do not introduce unrelated visual styles unless the user explicitly asks for a redesign
+- 参见 `docs/frontend-ui-style-guide.md`
+- 保持可爱、明亮、现代 SaaS dashboard 风格
+- 保持蓝色 / 紫色 / 薄荷绿的主色方向
+- 使用圆角卡片、柔和阴影、可读的中文 UI，以及轻量 mascot 风格装饰
+- 除非用户明确要求重新设计，不要引入无关视觉风格
 
-## Testing
+## 测试
 
-Recommended Go validation:
+推荐的 Go 校验方式：
 
 ```sh
 GOCACHE=$(pwd)/.gocache go test ./...
 ```
 
-Frontend validation:
+前端校验：
 
 ```sh
 npm run build:web
 ```
 
-Notes:
+说明：
 
-- `.gocache/` is intentionally ignored
-- some earlier environments had issues with local `httptest` binding, but the current repo was validated after migration
+- `.gocache/` 是刻意忽略的
+- 之前有些环境在本地 `httptest` 绑定上出过问题，但当前仓库在迁移后已经验证通过
 
-## Migration History
+## 迁移历史
 
-This project was migrated out of:
+这个项目迁移自：
 
 - `open-xiaoai/examples/go-instruction-server`
 
-It is now a standalone repository and should be developed there, not in the old example directory.
+它现在是一个独立仓库，应在这里继续开发，而不是回旧的 example 目录。
 
-## Current README Direction
+## 当前 README 方向
 
-README is meant for public consumption.
+README 面向公开读者。
 
-Keep it focused on:
+应当聚焦于：
 
-- what the project is
-- how to run it
-- what it depends on
-- what it currently supports
-- future high-level planning
+- 这个项目是什么
+- 怎么运行
+- 它依赖什么
+- 当前支持什么
+- 未来的高层规划
 
-Avoid dumping deep internal directory explanations into README.
+不要把太重的内部目录解释堆进 README。
 
-## Planned Direction
+## 规划方向
 
-The major planned architectural direction already discussed:
+目前已经讨论过的主要架构方向：
 
-- continue expanding the independent `IM Gateway`
-- support channels such as WeChat / QQ
-- keep IM integration outside OpenClaw
-- treat OpenClaw / Claude / future executors as pluggable workers, not channel adapters
+- 继续扩展独立的 `IM Gateway`
+- 支持微信 / QQ 等渠道
+- 让 IM 集成保持在 OpenClaw 之外
+- 把 OpenClaw / Claude / 未来执行器都视为可插拔 worker，而不是 channel adapter
 
-Desired boundary:
+理想边界：
 
-- `open-xiaoai` = device/client bridge
-- this repo = server-side orchestration
-- IM gateway = channel bridge
-- OpenClaw / Claude = async executors
+- `open-xiaoai` = 设备 / client bridge
+- 本仓库 = 服务端编排
+- IM gateway = 渠道路由桥
+- OpenClaw / Claude = 异步执行器
 
-## Practical Notes For Future Agents
+## 给未来 Agent 的实践备注
 
-- Do not re-couple this repo back to the `open-xiaoai` source tree.
-- Do not store executor-private state in the generic task table.
-- Do not commit `config.yaml` or real database credentials.
-- Prefer updating `AGENTS.md` when a meaningful architectural decision changes.
-- If a development change modifies product behavior, user-facing features, interaction flow, or delivery capabilities, you must update the relevant documents under `docs/` in the same change.
-- Keep plugin code isolated by plugin directory.
-- Keep README user-facing; put heavy dev context here instead.
+- 不要再把这个仓库重新耦合回 `open-xiaoai` 源码树。
+- 不要把执行器私有状态存进通用任务表。
+- 不要提交 `config.yaml` 或真实数据库凭据。
+- 如果有重要架构决策变化，优先更新 `AGENTS.md`。
+- 如果某次开发修改了产品行为、面向用户的能力、交互流程或交付能力，必须在同一个改动中同步更新 `docs/` 下相关文档。
+- 保持 plugin 代码按 plugin 目录隔离。
+- README 保持面向用户；重的开发上下文放在这里。
