@@ -723,7 +723,7 @@ func TestHandleTaskArtifactDownloadServesSavedArtifact(t *testing.T) {
 		Title:  "下载测试",
 		Input:  "生成一个可下载文件",
 		Run: func(ctx context.Context, reporter plugin.AsyncReporter) (string, error) {
-			artifact, err := reporter.PutArtifact(plugin.PutArtifactRequest{
+			_, err := reporter.PutArtifact(plugin.PutArtifactRequest{
 				Name:     "story.txt",
 				Kind:     "file",
 				MIMEType: "text/plain",
@@ -731,9 +731,6 @@ func TestHandleTaskArtifactDownloadServesSavedArtifact(t *testing.T) {
 				Size:     int64(len("download-me")),
 			})
 			if err != nil {
-				return "", err
-			}
-			if err := reporter.SetDeliverArtifacts([]string{artifact.ID}); err != nil {
 				return "", err
 			}
 			return "文件已经就绪。", nil

@@ -260,7 +260,7 @@ func TestManagerPutArtifactAndDownloadMetadata(t *testing.T) {
 		Title:  "产物测试",
 		Input:  "生成一个测试文件",
 		Run: func(ctx context.Context, reporter plugin.AsyncReporter) (string, error) {
-			artifact, err := reporter.PutArtifact(plugin.PutArtifactRequest{
+			_, err := reporter.PutArtifact(plugin.PutArtifactRequest{
 				Name:     "story.txt",
 				Kind:     "file",
 				MIMEType: "text/plain",
@@ -268,9 +268,6 @@ func TestManagerPutArtifactAndDownloadMetadata(t *testing.T) {
 				Size:     int64(len("hello artifact")),
 			})
 			if err != nil {
-				return "", err
-			}
-			if err := reporter.SetDeliverArtifacts([]string{artifact.ID}); err != nil {
 				return "", err
 			}
 			return "测试文件已经准备好了。", nil
@@ -292,14 +289,19 @@ func TestManagerPutArtifactAndDownloadMetadata(t *testing.T) {
 	if artifacts[0].TaskID != task.ID {
 		t.Fatalf("artifacts[0].TaskID = %q, want %q", artifacts[0].TaskID, task.ID)
 	}
-	if !artifacts[0].Deliver {
-		t.Fatal("artifacts[0].Deliver = false, want true")
-	}
 	if got := strings.TrimSpace(artifacts[0].StoragePath); got == "" {
 		t.Fatal("artifacts[0].StoragePath = empty")
 	}
 	if _, ok := manager.GetArtifact(task.ID, artifacts[0].ID); !ok {
 		t.Fatal("GetArtifact() = not found, want artifact")
+	}
+
+	deliveries := manager.ListTaskArtifactDeliveries([]string{task.ID})
+	if len(deliveries) != 1 {
+		t.Fatalf("len(deliveries) = %d, want 1", len(deliveries))
+	}
+	if deliveries[0].Delivery.Status != ArtifactDeliveryPending {
+		t.Fatalf("deliveries[0].Delivery.Status = %q, want %q", deliveries[0].Delivery.Status, ArtifactDeliveryPending)
 	}
 }
 

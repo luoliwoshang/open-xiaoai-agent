@@ -95,7 +95,6 @@ func (c *artifactCache) put(taskID string, req plugin.PutArtifactRequest, artifa
 		MIMEType:    mimeType,
 		StoragePath: storagePath,
 		SizeBytes:   sizeBytes,
-		Deliver:     false,
 	}, nil
 }
 

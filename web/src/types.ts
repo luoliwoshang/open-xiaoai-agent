@@ -47,7 +47,6 @@ export type TaskArtifact = {
   file_name: string
   mime_type: string
   size_bytes: number
-  deliver: boolean
   created_at: string
 }
 

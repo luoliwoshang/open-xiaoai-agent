@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/settings"
+	"github.com/luoliwoshang/open-xiaoai-agent/internal/tasks"
 )
 
 type runtimeSettings interface {
@@ -322,6 +323,78 @@ func (s *Service) SendFileToDefaultChannel(req FileSendRequest) (DeliveryReceipt
 		return DeliveryReceipt{}, err
 	}
 	return s.deliverFile(accountID, targetID, prepared, req.Caption)
+}
+
+// ResolveDefaultTaskArtifactDelivery 返回“当前主流程应该拿来发送任务产物的默认渠道”。
+//
+// 这里给主流程的不是完整 Account/Target 结构，而是最小可用信息：
+// - account_id
+// - target_id
+// - 用户能听懂的渠道标签
+//
+// 这样 assistant 在准备任务结果汇报时，可以先判断：
+// 1. 现在到底有没有可用的通知渠道；
+// 2. 如果有，后面语音里该自然说成“已经发到微信了”还是别的渠道。
+func (s *Service) ResolveDefaultTaskArtifactDelivery() (string, string, string, bool, error) {
+	if s == nil || s.store == nil || s.settings == nil {
+		return "", "", "", false, nil
+	}
+
+	accountID, targetID, err := s.resolveDefaultDeliverySelection()
+	if err != nil {
+		if strings.Contains(err.Error(), "默认渠道尚未配置") {
+			return "", "", "", false, nil
+		}
+		return "", "", "", false, err
+	}
+
+	account, ok, err := s.store.GetAccount(accountID)
+	if err != nil {
+		return "", "", "", false, err
+	}
+	if !ok {
+		return "", "", "", false, nil
+	}
+	return accountID, targetID, platformChannelLabel(account.Platform), true, nil
+}
+
+// DeliverTaskArtifact 把任务系统已经缓存好的产物直接发到指定 IM 目标。
+//
+// 这条路径和 dashboard 的“手动上传再发送”不同：
+// - dashboard 调试发送会先把浏览器上传内容写入 IM media cache；
+// - 任务产物发送则直接复用 task artifact cache 里的已落盘文件。
+//
+// 当前规则很简单：
+// - MIME 以 image/ 开头 => 走图片发送；
+// - 其它一律按文件发送。
+func (s *Service) DeliverTaskArtifact(accountID string, targetID string, artifact tasks.Artifact) (string, error) {
+	if s == nil || s.store == nil {
+		return "", fmt.Errorf("im service is not configured")
+	}
+
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(artifact.MIMEType)), "image/") {
+		receipt, err := s.deliverImage(accountID, targetID, PreparedImage{
+			FilePath: artifact.StoragePath,
+			FileName: artifact.FileName,
+			MimeType: artifact.MIMEType,
+			Size:     artifact.SizeBytes,
+		}, "")
+		if err != nil {
+			return "", err
+		}
+		return receipt.MessageID, nil
+	}
+
+	receipt, err := s.deliverFile(accountID, targetID, PreparedFile{
+		FilePath: artifact.StoragePath,
+		FileName: artifact.FileName,
+		MimeType: artifact.MIMEType,
+		Size:     artifact.SizeBytes,
+	}, "")
+	if err != nil {
+		return "", err
+	}
+	return receipt.MessageID, nil
 }
 
 func (s *Service) Reset() error {
@@ -648,6 +721,18 @@ func chooseFallbackTargetForAccount(accountID string, targets []Target) (Target,
 		return candidates[0], true
 	}
 	return Target{}, false
+}
+
+func platformChannelLabel(platform string) string {
+	switch strings.TrimSpace(platform) {
+	case PlatformWeChat:
+		return "微信"
+	default:
+		if strings.TrimSpace(platform) == "" {
+			return "通知渠道"
+		}
+		return strings.TrimSpace(platform)
+	}
 }
 
 func (s *Service) maybeSeedDefaultDeliverySelection(accountID string, targetID string) {
