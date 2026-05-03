@@ -21,7 +21,7 @@
 整体分成三层：
 
 1. Claude 在工作目录里生成真实文件。
-2. Claude 再写一个 manifest，声明哪些文件需要交付。
+2. Claude 把最终要交付的文件统一放进任务专属产物目录，再写一个 manifest，声明这些文件需要交付。
 3. Claude adapter 读取 manifest 和真实文件，再调用任务系统的 `PutArtifact`。
 
 也就是说：
@@ -29,6 +29,30 @@
 - manifest 只负责“声明”
 - adapter 负责“读取”
 - 任务系统负责“存储”和“创建交付记录”
+
+## 任务专属产物目录
+
+当前约定的可交付产物目录是：
+
+```text
+.open-xiaoai-agent/deliverables/<task_id>/
+```
+
+只要某个文件要通过任务系统作为产物交付，它就必须放在这个任务专属目录下。
+
+例如任务 ID 是 `task_123`，则可交付文件应该放在：
+
+```text
+.open-xiaoai-agent/deliverables/task_123/
+```
+
+这个目录下面可以再按需要分子目录，例如：
+
+```text
+.open-xiaoai-agent/deliverables/task_123/rabbit-game/index.html
+```
+
+但不能把最终交付文件随手放在工作目录根目录、`outputs/` 的任意旧路径，或者其他不受控位置。
 
 ## manifest 位置
 
@@ -56,13 +80,13 @@
 {
   "deliver": [
     {
-      "path": "outputs/rabbit-game/index.html",
+      "path": ".open-xiaoai-agent/deliverables/task_123/rabbit-game/index.html",
       "name": "rabbit-game.html",
       "kind": "file",
       "mime_type": "text/html"
     },
     {
-      "path": "outputs/rabbit-game/README.txt",
+      "path": ".open-xiaoai-agent/deliverables/task_123/rabbit-game/README.txt",
       "name": "README.txt",
       "kind": "file",
       "mime_type": "text/plain"
@@ -107,6 +131,7 @@ manifest 现在故意不承载文件内容，原因很直接：
    - 校验路径非空
    - 把相对路径解析到 Claude 工作目录下
    - 校验最终路径不能逃出工作目录
+   - 校验最终路径必须落在任务专属产物目录下
    - 打开真实文件并读取元数据
    - 调用 `PutArtifact`
 5. 全部导入成功后，追加一条“Claude 已登记 N 个交付产物”的任务事件。
@@ -148,13 +173,16 @@ Claude adapter 调用任务系统时，传的是：
 
 1. 能解析到一个真实存在的文件
 2. 最终路径必须仍然落在 Claude 工作目录内
+3. 最终路径必须落在 `.open-xiaoai-agent/deliverables/<task_id>/` 下面
 
 这意味着：
 
-- `outputs/index.html` 这种路径是允许的
+- `.open-xiaoai-agent/deliverables/task_123/index.html` 这种路径是允许的
+- `.open-xiaoai-agent/deliverables/task_123/game/index.html` 这种路径也是允许的
+- `outputs/index.html` 这种旧式随意路径现在不再允许
 - `../secret.txt` 这种越界路径会被拒绝
 
-这样做是为了防止 manifest 把任务系统带去读取工作目录外的任意文件。
+这样做是为了防止 manifest 把任务系统带去读取工作目录外的任意文件，也避免“最终可交付产物落在任意位置”。
 
 ## 失败策略
 
@@ -177,9 +205,11 @@ Claude adapter 调用任务系统时，传的是：
 1. 如果本次任务有需要交付给系统的文件，必须写 manifest。
 2. manifest 只能声明元数据和相对路径。
 3. `path` 必须指向这次任务真实生成的文件。
-4. 如果没有交付文件，就不要创建 manifest。
-5. 这些路径和 manifest 规则只属于执行器内部协议，不应该出现在面向用户的进度或最终总结里。
-6. 面向用户的表达应尽量口语化、易懂，避免过于专业、冗余或工程化。
+4. 所有要交付的文件都必须放在 `.open-xiaoai-agent/deliverables/<task_id>/` 下。
+5. 如果没有交付文件，就不要创建 manifest。
+6. 这些路径和 manifest 规则只属于执行器内部协议，不应该出现在面向用户的进度或最终总结里。
+7. 面向用户的表达应尽量口语化、易懂，避免过于专业、冗余或工程化。
+8. 即使已经产出了文件，最终总结里也不要直接说“保存为 xxx.png / xxx.html / xxx.txt”。
 
 这意味着 Claude 的最终自然语言总结和机器可读的产物声明被拆成了两条：
 

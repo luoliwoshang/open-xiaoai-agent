@@ -132,8 +132,10 @@ func TestBuildClaudePrompt(t *testing.T) {
 		"进度汇报要相对简短",
 		"不要使用特殊符号、emoji、Markdown 列表、代码块",
 		"如果任务还没有真正结束，不要提前说已经完成",
+		".open-xiaoai-agent/deliverables/task_1",
 		".open-xiaoai-agent/artifacts/task_1.json",
 		"这个 JSON 文件只负责声明交付产物位置和元数据",
+		"不要直接说“保存为 xxx.png / xxx.html / xxx.txt”",
 		"不要提工作目录、相对路径、绝对路径、manifest、终端命令",
 		"普通人能直接听懂",
 	} {
@@ -151,7 +153,9 @@ func TestBuildClaudeResumePrompt(t *testing.T) {
 		"继续基于刚才已经完成的同一个任务接着处理",
 		"补充要求如下：把刚刚那个网页再加一个按钮",
 		"把这次输入视为对上一个任务的补充、修改或追加要求",
+		".open-xiaoai-agent/deliverables/task_2",
 		".open-xiaoai-agent/artifacts/task_2.json",
+		"不要直接说“保存为 xxx.png / xxx.html / xxx.txt”",
 		"不要提工作目录、相对路径、绝对路径、manifest、终端命令",
 		"普通人能直接听懂",
 	} {
@@ -175,7 +179,7 @@ func TestImportArtifactsFromManifest(t *testing.T) {
 	t.Parallel()
 
 	cwd := t.TempDir()
-	outputDir := filepath.Join(cwd, "outputs", "rabbit-game")
+	outputDir := filepath.Join(cwd, ".open-xiaoai-agent", "deliverables", "task_1", "rabbit-game")
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
@@ -196,13 +200,13 @@ func TestImportArtifactsFromManifest(t *testing.T) {
 	manifest := artifactManifest{
 		Deliver: []artifactManifestEntry{
 			{
-				Path:     "outputs/rabbit-game/index.html",
+				Path:     ".open-xiaoai-agent/deliverables/task_1/rabbit-game/index.html",
 				Name:     "rabbit-game.html",
 				Kind:     "file",
 				MIMEType: "text/html",
 			},
 			{
-				Path:     "outputs/rabbit-game/README.txt",
+				Path:     ".open-xiaoai-agent/deliverables/task_1/rabbit-game/README.txt",
 				Name:     "README.txt",
 				Kind:     "file",
 				MIMEType: "text/plain",
@@ -262,6 +266,47 @@ func TestImportArtifactsRejectsEscapingPath(t *testing.T) {
 	runner := NewClaudeRunner(nil, cwd)
 	if err := runner.importArtifacts("task_1", reporter); err == nil {
 		t.Fatal("importArtifacts() error = nil, want non-nil")
+	}
+}
+
+func TestImportArtifactsRejectsPathOutsideTaskDeliverableDir(t *testing.T) {
+	t.Parallel()
+
+	cwd := t.TempDir()
+	outputDir := filepath.Join(cwd, "outputs")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(outputs) error = %v", err)
+	}
+	filePath := filepath.Join(outputDir, "night_sky.png")
+	if err := os.WriteFile(filePath, []byte("fake-png"), 0o644); err != nil {
+		t.Fatalf("WriteFile(file) error = %v", err)
+	}
+
+	manifestDir := filepath.Join(cwd, ".open-xiaoai-agent", "artifacts")
+	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(manifest) error = %v", err)
+	}
+	manifestPath := filepath.Join(manifestDir, "task_1.json")
+	raw, err := json.Marshal(artifactManifest{
+		Deliver: []artifactManifestEntry{
+			{Path: "outputs/night_sky.png", Name: "night_sky.png", Kind: "file", MIMEType: "image/png"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if err := os.WriteFile(manifestPath, raw, 0o644); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	reporter := &fakeReporter{taskID: "task_1"}
+	runner := NewClaudeRunner(nil, cwd)
+	err = runner.importArtifacts("task_1", reporter)
+	if err == nil {
+		t.Fatal("importArtifacts() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), ".open-xiaoai-agent/deliverables/task_1") {
+		t.Fatalf("importArtifacts() error = %q, want mention deliverable dir", err)
 	}
 }
 

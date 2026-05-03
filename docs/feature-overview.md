@@ -105,6 +105,7 @@
 ### 2.7 Claude Code 产物 manifest 机制
 
 - Claude 任务已经支持通过 manifest 声明交付产物
+- 所有可交付文件必须统一落在任务专属目录 `.open-xiaoai-agent/deliverables/<task_id>/`
 - manifest 只负责声明：
   - 哪些文件要交付
   - 文件名

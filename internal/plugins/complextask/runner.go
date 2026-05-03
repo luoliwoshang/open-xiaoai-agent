@@ -237,6 +237,7 @@ type artifactManifestEntry struct {
 func buildClaudePrompt(taskID string, task string) string {
 	task = strings.TrimSpace(task)
 	manifestPath := artifactManifestRelativePath(taskID)
+	artifactDir := artifactOutputDirRelativePath(taskID)
 	return strings.TrimSpace(fmt.Sprintf(
 		`执行以下任务：%s
 
@@ -245,15 +246,19 @@ func buildClaudePrompt(taskID string, task string) string {
 2. 进度汇报只用自然中文短句，不要使用特殊符号、emoji、Markdown 列表、代码块或其他不利于 TTS 识别的格式。
 3. 如果任务还没有真正结束，不要提前说已经完成。
 4. 最终总结也要简短精炼，默认按可以直接播报给用户的口语化结果来写。
-5. 如果本次任务产出了需要交付给系统的文件，请在工作目录里写入 JSON 索引文件：%s
-6. 这个 JSON 文件只负责声明交付产物位置和元数据，不要把文件内容写进 JSON。
-7. JSON 结构固定为 {"deliver":[{"path":"相对工作目录的文件路径","name":"展示文件名","kind":"file","mime_type":"可选 MIME 类型"}]}。
-8. manifest 里的 path 必须指向这次任务真实生成的文件，并且使用相对工作目录的路径。
-9. 如果没有需要交付的文件，就不要创建这个 JSON 索引文件。
-10. 最终总结优先说明两件事：你完成了什么、用户接下来可以怎么用；尽量控制在 2 到 4 句，不要长篇展开。
-11. 真实用户并不坐在你所在的电脑前，所以面向用户的进度汇报和最终总结里，不要提工作目录、相对路径、绝对路径、manifest、终端命令或其他内部工程细节。
-12. 面向用户的表达默认按普通人能直接听懂的方式来写，避免过于专业、冗余或工程化的描述。`,
+5. 如果本次任务产出了需要交付给系统的文件，必须把这些最终交付文件统一放在目录：%s
+6. 不要把需要交付的最终文件直接留在工作目录根目录、桌面路径描述或其他任意位置；只要是要交付给系统的产物，就必须放进这个任务专属目录。
+7. 然后在工作目录里写入 JSON 索引文件：%s
+8. 这个 JSON 文件只负责声明交付产物位置和元数据，不要把文件内容写进 JSON。
+9. JSON 结构固定为 {"deliver":[{"path":"相对工作目录的文件路径","name":"展示文件名","kind":"file","mime_type":"可选 MIME 类型"}]}。
+10. manifest 里的 path 必须指向这次任务真实生成的文件，并且只能引用上面那个任务专属目录里的文件。
+11. 如果没有需要交付的文件，就不要创建这个 JSON 索引文件。
+12. 最终总结优先说明两件事：你完成了什么、用户接下来可以怎么用；尽量控制在 2 到 4 句，不要长篇展开。
+13. 真实用户并不坐在你所在的电脑前，所以面向用户的进度汇报和最终总结里，不要提工作目录、相对路径、绝对路径、manifest、终端命令、文件保存位置或内部工程细节。
+14. 如果已经产出了文件，也不要直接说“保存为 xxx.png / xxx.html / xxx.txt”；只需要说明你已经把结果准备好了，系统会按产物交付流程处理。
+15. 面向用户的表达默认按普通人能直接听懂的方式来写，避免过于专业、冗余或工程化的描述。`,
 		task,
+		artifactDir,
 		manifestPath,
 	))
 }
@@ -261,6 +266,7 @@ func buildClaudePrompt(taskID string, task string) string {
 func buildClaudeResumePrompt(taskID string, task string) string {
 	task = strings.TrimSpace(task)
 	manifestPath := artifactManifestRelativePath(taskID)
+	artifactDir := artifactOutputDirRelativePath(taskID)
 	return strings.TrimSpace(fmt.Sprintf(
 		`继续基于刚才已经完成的同一个任务接着处理。补充要求如下：%s
 
@@ -270,15 +276,19 @@ func buildClaudeResumePrompt(taskID string, task string) string {
 3. 进度汇报只用自然中文短句，不要使用特殊符号、emoji、Markdown 列表、代码块或其他不利于 TTS 识别的格式。
 4. 如果任务还没有真正结束，不要提前说已经完成。
 5. 最终总结也要简短精炼，默认按可以直接播报给用户的口语化结果来写。
-6. 如果本次续做任务产出了需要交付给系统的文件，请在工作目录里写入 JSON 索引文件：%s
-7. 这个 JSON 文件只负责声明交付产物位置和元数据，不要把文件内容写进 JSON。
-8. JSON 结构固定为 {"deliver":[{"path":"相对工作目录的文件路径","name":"展示文件名","kind":"file","mime_type":"可选 MIME 类型"}]}。
-9. manifest 里的 path 必须指向这次续做真实生成或更新过的文件，并且使用相对工作目录的路径。
-10. 如果这次续做没有新的交付文件，就不要创建这个 JSON 索引文件。
-11. 最终总结优先说明两件事：这次补充后你完成了什么、用户接下来可以怎么用；尽量控制在 2 到 4 句，不要长篇展开。
-12. 真实用户并不坐在你所在的电脑前，所以面向用户的进度汇报和最终总结里，不要提工作目录、相对路径、绝对路径、manifest、终端命令或其他内部工程细节。
-13. 面向用户的表达默认按普通人能直接听懂的方式来写，避免过于专业、冗余或工程化的描述。`,
+6. 如果本次续做任务产出了需要交付给系统的文件，必须把这些最终交付文件统一放在目录：%s
+7. 不要把需要交付的最终文件直接留在工作目录根目录、桌面路径描述或其他任意位置；只要是要交付给系统的产物，就必须放进这个任务专属目录。
+8. 然后在工作目录里写入 JSON 索引文件：%s
+9. 这个 JSON 文件只负责声明交付产物位置和元数据，不要把文件内容写进 JSON。
+10. JSON 结构固定为 {"deliver":[{"path":"相对工作目录的文件路径","name":"展示文件名","kind":"file","mime_type":"可选 MIME 类型"}]}。
+11. manifest 里的 path 必须指向这次续做真实生成或更新过的文件，并且只能引用上面那个任务专属目录里的文件。
+12. 如果这次续做没有新的交付文件，就不要创建这个 JSON 索引文件。
+13. 最终总结优先说明两件事：这次补充后你完成了什么、用户接下来可以怎么用；尽量控制在 2 到 4 句，不要长篇展开。
+14. 真实用户并不坐在你所在的电脑前，所以面向用户的进度汇报和最终总结里，不要提工作目录、相对路径、绝对路径、manifest、终端命令、文件保存位置或其他内部工程细节。
+15. 如果已经产出了文件，也不要直接说“保存为 xxx.png / xxx.html / xxx.txt”；只需要说明你已经把结果准备好了，系统会按产物交付流程处理。
+16. 面向用户的表达默认按普通人能直接听懂的方式来写，避免过于专业、冗余或工程化的描述。`,
 		task,
+		artifactDir,
 		manifestPath,
 	))
 }
@@ -294,7 +304,7 @@ func (r *ClaudeRunner) importArtifacts(taskID string, reporter plugin.AsyncRepor
 
 	deliverIDs := make([]string, 0, len(manifest.Deliver))
 	for index, item := range manifest.Deliver {
-		req, err := r.buildArtifactRequest(item)
+		req, err := r.buildArtifactRequest(taskID, item)
 		if err != nil {
 			return fmt.Errorf("import manifest deliver[%d]: %w", index, err)
 		}
@@ -327,8 +337,8 @@ func (r *ClaudeRunner) loadArtifactManifest(taskID string) (artifactManifest, bo
 	return manifest, true, nil
 }
 
-func (r *ClaudeRunner) buildArtifactRequest(item artifactManifestEntry) (plugin.PutArtifactRequest, error) {
-	resolvedPath, err := resolveArtifactPath(r.cwd, item.Path)
+func (r *ClaudeRunner) buildArtifactRequest(taskID string, item artifactManifestEntry) (plugin.PutArtifactRequest, error) {
+	resolvedPath, err := resolveArtifactPath(r.cwd, taskID, item.Path)
 	if err != nil {
 		return plugin.PutArtifactRequest{}, err
 	}
@@ -374,8 +384,21 @@ func artifactManifestAbsolutePath(cwd string, taskID string) string {
 	return filepath.Join(strings.TrimSpace(cwd), filepath.FromSlash(artifactManifestRelativePath(taskID)))
 }
 
-func resolveArtifactPath(cwd string, rawPath string) (string, error) {
+func artifactOutputDirRelativePath(taskID string) string {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		taskID = "task"
+	}
+	return filepath.ToSlash(filepath.Join(".open-xiaoai-agent", "deliverables", taskID))
+}
+
+func artifactOutputDirAbsolutePath(cwd string, taskID string) string {
+	return filepath.Join(strings.TrimSpace(cwd), filepath.FromSlash(artifactOutputDirRelativePath(taskID)))
+}
+
+func resolveArtifactPath(cwd string, taskID string, rawPath string) (string, error) {
 	cwd = strings.TrimSpace(cwd)
+	taskID = strings.TrimSpace(taskID)
 	rawPath = strings.TrimSpace(rawPath)
 	if rawPath == "" {
 		return "", fmt.Errorf("artifact path is required")
@@ -401,6 +424,22 @@ func resolveArtifactPath(cwd string, rawPath string) (string, error) {
 	}
 	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("artifact path %q escapes claude working directory", rawPath)
+	}
+
+	allowedDir, err := filepath.Abs(artifactOutputDirAbsolutePath(root, taskID))
+	if err != nil {
+		return "", fmt.Errorf("resolve artifact output dir: %w", err)
+	}
+	allowedRelative, err := filepath.Rel(root, allowedDir)
+	if err != nil {
+		return "", fmt.Errorf("rel artifact output dir: %w", err)
+	}
+	if relative != allowedRelative && !strings.HasPrefix(relative, allowedRelative+string(filepath.Separator)) {
+		return "", fmt.Errorf(
+			"artifact path %q must stay under %q",
+			rawPath,
+			artifactOutputDirRelativePath(taskID),
+		)
 	}
 	return target, nil
 }

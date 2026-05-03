@@ -455,6 +455,8 @@ claude --dangerously-skip-permissions --resume "<session_id>" --print --output-f
 - 要求给出简短的进度更新
 - 避免进度里出现奇怪符号或 markdown 噪音
 - 面向用户的进度 / 最终摘要不应出现 workdir 路径、manifest 路径、终端命令以及其他执行器内部细节
+- 如果 Claude 产出了要交付给系统的文件，这些文件必须统一放在 `.open-xiaoai-agent/deliverables/<task_id>/` 下
+- 面向用户的最终摘要也不应直接说“保存为 xxx.png / xxx.html / xxx.txt”
 - 面向用户的措辞应保持朴素、普通用户可理解，不要过度专业或冗长
 - 如果 Claude 需要把文件交还给系统，应在 `.open-xiaoai-agent/artifacts/<task_id>.json` 下写一个 manifest 索引文件
 - 最终摘要仍应保持简洁且适合 TTS
@@ -462,6 +464,7 @@ claude --dangerously-skip-permissions --resume "<session_id>" --print --output-f
 Claude artifact handoff 规则：
 
 - manifest 文件本身只是一个可交付文件位置与元数据的索引
+- manifest 里声明的 path 只能引用 `.open-xiaoai-agent/deliverables/<task_id>/` 下的文件
 - Claude adapter 会读取这些本地文件，并调用通用任务 artifact API
 - 原始本地路径不会跨过任务系统边界
 
