@@ -195,6 +195,18 @@ body {
   padding: 3px 0;
 }
 
+.status-row-detail {
+  margin-top: -1px;
+  color: var(--text-ghost);
+}
+
+.status-detail-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .status-dot {
   width: 7px;
   height: 7px;
@@ -207,6 +219,7 @@ body {
 .status-dot.yellow { background: var(--yellow); }
 .status-dot.blue { background: var(--blue); }
 .status-dot.gray { background: var(--text-ghost); }
+.status-dot.purple { background: var(--purple); }
 
 /* ---- Main Content ---- */
 .main-content {

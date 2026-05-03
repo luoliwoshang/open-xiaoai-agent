@@ -11,7 +11,7 @@ export default function App() {
 
   return (
     <div className="app-layout">
-      <Sidebar page={page} assistant={state.assistant} xiaoai={state.xiaoai} />
+      <Sidebar page={page} assistant={state.assistant} xiaoai={state.xiaoai} settings={state.settings} im={state.im} />
       <main className="main-content">
         {error && (
           <div style={{
