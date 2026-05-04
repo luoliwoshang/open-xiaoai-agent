@@ -4,6 +4,8 @@
 [![codecov](https://codecov.io/gh/luoliwoshang/open-xiaoai-agent/branch/main/graph/badge.svg)](https://codecov.io/gh/luoliwoshang/open-xiaoai-agent)
 [![Go Report Card](https://goreportcard.com/badge/github.com/luoliwoshang/open-xiaoai-agent)](https://goreportcard.com/report/github.com/luoliwoshang/open-xiaoai-agent)
 [![Go version](https://img.shields.io/github/go-mod/go-version/luoliwoshang/open-xiaoai-agent)](https://golang.org/)
+[![Node.js version](https://img.shields.io/badge/node-20-brightgreen)](https://nodejs.org/)
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 `XiaoAiAgent` 是面向 [`open-xiaoai`](https://github.com/idootop/open-xiaoai) 生态的独立服务端，仓库名为 `open-xiaoai-agent`。
 
