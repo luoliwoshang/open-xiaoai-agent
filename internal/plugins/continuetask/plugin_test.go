@@ -45,7 +45,7 @@ func TestContinueTaskRegisterAndCall(t *testing.T) {
 		t.Fatalf("Register() error = %v", err)
 	}
 
-	result, err := registry.Call(context.Background(), "continue_task", json.RawMessage(`{"plugin_name":"complex_task","task_id":"task_1","request":"再加一个开始按钮"}`))
+	result, err := registry.Call(context.Background(), "continue_task", json.RawMessage(`{"task_id":"task_1","request":"再加一个开始按钮"}`))
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}

@@ -23,6 +23,14 @@ type Manager struct {
 	onResultReportReady func()
 }
 
+type intentTaskChainSnapshot struct {
+	LatestTaskID    string
+	InitialRequest  string
+	DialogueLines   []string
+	FinalReply      string
+	LatestUpdatedAt time.Time
+}
+
 func NewManager(dsn string, artifactCacheDir string) (*Manager, error) {
 	store, err := NewStore(dsn)
 	if err != nil {
@@ -235,29 +243,19 @@ func (m *Manager) GetTask(taskID string) (*Task, bool) {
 	return nil, false
 }
 
+// CompletedTasksForIntent 生成“给 intent 模型看的最近可续接任务链摘要”。
+//
+// 这里不再平铺单个 task 行，而是把同一条 parent_task_id 链折叠成一个候选块：
+// 1. 先按任务链归并任务；
+// 2. 每条链只保留“当前最新的已完成节点”；
+// 3. 如果这条链最新节点不是 completed，则整条链不进入 continue_task 候选；
+// 4. 最后按最新节点 UpdatedAt 从新到旧排序，并按 limit 截断。
 func (m *Manager) CompletedTasksForIntent(limit int) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	tasks := append([]Task(nil), m.state.Tasks...)
-	sort.Slice(tasks, func(i, j int) bool {
-		return tasks[i].UpdatedAt.After(tasks[j].UpdatedAt)
-	})
-
-	var items []string
-	for _, task := range tasks {
-		if task.State != StateCompleted {
-			continue
-		}
-		items = append(items, formatCompletedTaskForIntent(task))
-		if len(items) >= limit {
-			break
-		}
-	}
-	if len(items) == 0 {
-		return ""
-	}
-	return "最近已完成任务列表如下。如果用户现在是在补充、修改、继续之前做完的任务，请优先从下面选择最匹配的任务并调用 continue_task：\n" + strings.Join(items, "\n")
+	snapshots := buildIntentTaskChainSnapshots(m.state.Tasks, limit)
+	return buildIntentTaskChainPrompt(snapshots)
 }
 
 func formatProgressItem(task Task) string {
@@ -277,30 +275,224 @@ func formatProgressItem(task Task) string {
 	)
 }
 
-func formatCompletedTaskForIntent(task Task) string {
-	title := strings.TrimSpace(task.Title)
-	if title == "" {
-		title = "未命名任务"
+func buildIntentTaskChainPrompt(snapshots []intentTaskChainSnapshot) string {
+	if len(snapshots) == 0 {
+		return ""
 	}
-	pluginName := strings.TrimSpace(task.Plugin)
-	if pluginName == "" {
-		pluginName = strings.TrimSpace(task.Kind)
+
+	var blocks []string
+	for _, snapshot := range snapshots {
+		blocks = append(blocks, formatIntentTaskChainSnapshot(snapshot))
 	}
-	summary := compactTaskText(task.Summary)
-	if summary == "" {
-		summary = compactTaskText(task.Result)
-	}
-	if summary == "" {
-		summary = "暂无摘要"
+
+	return strings.TrimSpace(
+		"下面是最近可继续的任务链摘要。每条摘要都代表一条任务链当前最新的已完成节点。\n" +
+			"如果用户现在是在补充、修改、继续之前已经做完的任务，请优先从下面选择最匹配的一条，并调用 continue_task。\n" +
+			"注意：调用 continue_task 时，task_id 必须填写对应摘要里的 latest_task_id，不要自己编造。\n\n" +
+			strings.Join(blocks, "\n\n"),
+	)
+}
+
+func formatIntentTaskChainSnapshot(snapshot intentTaskChainSnapshot) string {
+	var body string
+	if len(snapshot.DialogueLines) == 0 {
+		body = "中间轮次对话：无"
+	} else {
+		body = "中间轮次对话：\n" + strings.Join(snapshot.DialogueLines, "\n")
 	}
 
 	return fmt.Sprintf(
-		"- task_id=%s plugin=%s title=%s summary=%s",
-		task.ID,
-		pluginName,
-		title,
-		summary,
+		"[latest_task_id=%s]\n初始任务需求：%s\n%s\n任务最后回答：%s",
+		snapshot.LatestTaskID,
+		snapshot.InitialRequest,
+		body,
+		snapshot.FinalReply,
 	)
+}
+
+// buildIntentTaskChainSnapshots 把零散 task 行折叠成“给 continue_task 用的任务链摘要快照”。
+//
+// 当前策略故意把“可续接的上下文”组织成一条自然链：
+// - 初始任务需求
+// - 中间轮次对话
+// - 任务最后回答
+//
+// 这样模型在命中 continue_task 时，看到的是“这件事是怎么一路做过来的”，
+// 而不是一堆平铺的 title / summary 字段。
+func buildIntentTaskChainSnapshots(tasks []Task, limit int) []intentTaskChainSnapshot {
+	if limit <= 0 || len(tasks) == 0 {
+		return nil
+	}
+
+	byID := make(map[string]Task, len(tasks))
+	for _, task := range tasks {
+		taskID := strings.TrimSpace(task.ID)
+		if taskID == "" {
+			continue
+		}
+		byID[taskID] = task
+	}
+
+	chains := make(map[string][]Task)
+	for _, task := range tasks {
+		taskID := strings.TrimSpace(task.ID)
+		if taskID == "" {
+			continue
+		}
+		rootID := resolveIntentTaskChainRootID(task, byID)
+		chains[rootID] = append(chains[rootID], task)
+	}
+
+	snapshots := make([]intentTaskChainSnapshot, 0, len(chains))
+	for _, chainTasks := range chains {
+		latest := latestTaskByUpdatedAt(chainTasks)
+		if strings.TrimSpace(latest.ID) == "" || latest.State != StateCompleted {
+			continue
+		}
+
+		lineage := buildIntentTaskLineage(latest, byID)
+		if len(lineage) == 0 {
+			continue
+		}
+
+		root := lineage[0]
+		snapshots = append(snapshots, intentTaskChainSnapshot{
+			LatestTaskID:    latest.ID,
+			InitialRequest:  taskInitialRequestForIntent(root),
+			DialogueLines:   buildIntentTaskDialogueLines(lineage),
+			FinalReply:      taskReplyForIntent(latest),
+			LatestUpdatedAt: latest.UpdatedAt,
+		})
+	}
+
+	sort.Slice(snapshots, func(i, j int) bool {
+		return snapshots[i].LatestUpdatedAt.After(snapshots[j].LatestUpdatedAt)
+	})
+	if len(snapshots) > limit {
+		snapshots = snapshots[:limit]
+	}
+	return snapshots
+}
+
+func resolveIntentTaskChainRootID(task Task, byID map[string]Task) string {
+	current := task
+	visited := make(map[string]struct{})
+	for {
+		currentID := strings.TrimSpace(current.ID)
+		if currentID == "" {
+			return strings.TrimSpace(task.ID)
+		}
+		if _, ok := visited[currentID]; ok {
+			return currentID
+		}
+		visited[currentID] = struct{}{}
+
+		parentID := strings.TrimSpace(current.ParentTaskID)
+		if parentID == "" {
+			return currentID
+		}
+		parent, ok := byID[parentID]
+		if !ok {
+			return currentID
+		}
+		current = parent
+	}
+}
+
+func latestTaskByUpdatedAt(tasks []Task) Task {
+	if len(tasks) == 0 {
+		return Task{}
+	}
+	latest := tasks[0]
+	for _, task := range tasks[1:] {
+		if task.UpdatedAt.After(latest.UpdatedAt) {
+			latest = task
+			continue
+		}
+		if task.UpdatedAt.Equal(latest.UpdatedAt) && task.CreatedAt.After(latest.CreatedAt) {
+			latest = task
+		}
+	}
+	return latest
+}
+
+func buildIntentTaskLineage(latest Task, byID map[string]Task) []Task {
+	var reversed []Task
+	current := latest
+	visited := make(map[string]struct{})
+	for {
+		currentID := strings.TrimSpace(current.ID)
+		if currentID == "" {
+			break
+		}
+		if _, ok := visited[currentID]; ok {
+			break
+		}
+		visited[currentID] = struct{}{}
+		reversed = append(reversed, current)
+
+		parentID := strings.TrimSpace(current.ParentTaskID)
+		if parentID == "" {
+			break
+		}
+		parent, ok := byID[parentID]
+		if !ok {
+			break
+		}
+		current = parent
+	}
+
+	lineage := make([]Task, 0, len(reversed))
+	for i := len(reversed) - 1; i >= 0; i-- {
+		lineage = append(lineage, reversed[i])
+	}
+	return lineage
+}
+
+func buildIntentTaskDialogueLines(lineage []Task) []string {
+	if len(lineage) <= 1 {
+		return nil
+	}
+
+	lines := make([]string, 0, len(lineage)*2)
+	rootReply := taskReplyForIntent(lineage[0])
+	if rootReply != "" {
+		lines = append(lines, "- 任务执行器："+rootReply)
+	}
+	for _, task := range lineage[1:] {
+		input := compactTaskText(strings.TrimSpace(task.Input))
+		if input != "" {
+			lines = append(lines, "- 用户追加输入："+input)
+		}
+		reply := taskReplyForIntent(task)
+		if reply != "" {
+			lines = append(lines, "- 任务执行器："+reply)
+		}
+	}
+	return lines
+}
+
+func taskInitialRequestForIntent(task Task) string {
+	input := compactTaskText(strings.TrimSpace(task.Input))
+	if input != "" {
+		return input
+	}
+	title := compactTaskText(strings.TrimSpace(task.Title))
+	if title != "" {
+		return title
+	}
+	return "无"
+}
+
+func taskReplyForIntent(task Task) string {
+	reply := compactTaskText(strings.TrimSpace(task.Summary))
+	if reply == "" {
+		reply = compactTaskText(strings.TrimSpace(task.Result))
+	}
+	if reply == "" {
+		reply = "暂无结果"
+	}
+	return reply
 }
 
 func (m *Manager) BuildResultReport(limit int) (string, []string) {
