@@ -48,8 +48,8 @@ func TestRecallCreatesDefaultFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Recall() error = %v", err)
 	}
-	if !strings.Contains(got, "# XiaoAiAgent Memory") {
-		t.Fatalf("Recall() = %q", got)
+	if got != "" {
+		t.Fatalf("Recall() = %q, want empty", got)
 	}
 }
 
@@ -59,7 +59,7 @@ func TestUpdateFromSessionRewritesFileAndWritesLog(t *testing.T) {
 	service, err := New(testmysql.NewDSN(t), fakeSettings{
 		snapshot: settings.Snapshot{MemoryStorageDir: t.TempDir()},
 	}, fakeUpdater{
-		result: "# XiaoAiAgent Memory\n\n## 长期记忆\n\n- 用户家里 Home Assistant 地址是 http://ha.local:8123\n\n## 最近一次会话整理\n\n- 这次提到了 Home Assistant 地址。\n",
+		result: "- 用户家里 Home Assistant 地址是 http://ha.local:8123\n- 用户希望后续默认按这个地址排查问题。\n",
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

@@ -59,6 +59,7 @@
 - `complex_task` / `continue_task` 也会拿到这份长期记忆
 - intent 当前不会读取长期记忆
 - 长期记忆不会按每轮对话高频写回，而是在一次 session 自然结束后再做低频整理
+- 记忆整理被约束为禁止凭空补全未出现事实；如果新对话与旧记忆冲突，应更新旧记忆
 - 默认实现是本地 Markdown 文件，不是向量库
 - 记忆目录配置保存在 MySQL `settings.memory_storage_dir`
 - 记忆更新日志会写入 MySQL，供 Dashboard 查看 diff

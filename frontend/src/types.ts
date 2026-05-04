@@ -170,7 +170,9 @@ export interface MemoryUpdateLog {
   id: string
   memory_key: string
   source: string
-  messages: ConversationMessage[] | null
+  source_label: string
+  preview: string
+  summary_context: ConversationMessage[] | null
   before: string
   after: string
   created_at: string

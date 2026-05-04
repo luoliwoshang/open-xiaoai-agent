@@ -14,6 +14,22 @@ type LLMUpdater struct {
 	config config.ModelConfig
 }
 
+const memoryUpdateSystemPrompt = `
+你负责整理 XiaoAiAgent 的长期记忆。
+
+你不会生成聊天回复，你只会根据“已有记忆内容”和“最近的一次对话”，输出新的完整记忆文件内容。
+
+要求：
+1. 只保留以后仍然值得记住的信息，例如用户偏好、固定环境说明、常用服务地址、长期项目背景、明确要求记住的事实。
+2. 琐碎的助手回答、不重要的寒暄、临时过程、一次性噪音，不要记。
+3. 不要把最近对话逐轮抄写进记忆，也不要写成长篇总结。
+4. 绝对禁止凭空补全信息。名字、身份、关系、地点、偏好、经历等内容，只有在“已有记忆内容”或“最近的对话”里被明确说出时才能写入；不能猜、不能脑补、不能为了让语句更完整而擅自补充。
+5. 尽量保留已有记忆里仍然有效的内容；如果最近对话修正了旧信息，就直接更新。
+6. 如果最近对话里的新信息与已有记忆冲突，应以最近对话中明确的新事实为准，对旧记忆做更新、删减或替换，而不是把相互冲突的两份说法同时保留下来。
+7. 如果最近对话明确否定了旧记忆中的某一条内容，就应该删除或改写那条错误记忆。
+8. 输出必须是“更新后的完整记忆文件内容”，不要输出解释、前言、代码块或 JSON。
+9. 如果最近对话没有带来新的长期价值信息，就返回整理后的原记忆内容；如果原来就是空的，也可以返回空内容。`
+
 func NewLLMUpdater(client *llm.Client, cfg config.ModelConfig) *LLMUpdater {
 	return &LLMUpdater{
 		client: client,
@@ -34,64 +50,42 @@ func (u *LLMUpdater) UpdateFromSession(ctx context.Context, memoryKey string, cu
 		return strings.TrimSpace(currentMemory), nil
 	}
 
-	messages := []llm.Message{
-		{
-			Role: "system",
-			Content: strings.TrimSpace(`
-你是 XiaoAiAgent 的长期记忆整理器。
-
-你的职责不是生成聊天回复，而是维护一份“长期记忆 Markdown 文件”。
-
-要求：
-1. 你会看到“当前已有长期记忆”和“刚结束的一次完整会话 history”。
-2. 只提炼以后仍然有价值的稳定信息，例如：
-   - 用户偏好
-   - 常用服务地址
-   - 固定环境说明
-   - 长期项目背景
-   - 明确要求记住的事实
-3. 不要把整段对话逐字抄进记忆。
-4. 不要把一次性的寒暄、临时任务过程、无长期价值的瞬时状态写进长期记忆。
-5. 要尽量保留已有记忆中用户手动维护的有效内容；如果本次会话明确修正了旧信息，可以更新。
-6. 输出必须是“更新后的完整 Markdown 文件正文”，不要输出解释、前言、代码块或 JSON。
-7. 保持文件结构清晰，至少保留这两个部分：
-   - ## 长期记忆
-   - ## 最近一次会话整理
-8. “最近一次会话整理”只需要简洁概括这次刚结束会话的重点，不要写成逐轮 transcript。
-9. 如果本次会话没有带来新的长期价值信息，也仍然输出完整文件，但只做最小必要更新。`),
-		},
-		{
-			Role: "user",
-			Content: strings.TrimSpace(fmt.Sprintf(`
-记忆键：%s
-
-当前已有长期记忆文件：
------
-%s
------
-
-刚结束的一次完整会话 history：
------
-%s
------
-
-请直接输出更新后的完整 Markdown 文件正文。`,
-				strings.TrimSpace(memoryKey),
-				strings.TrimSpace(currentMemory),
-				renderSessionHistory(history),
-			)),
-		},
-	}
+	messages := buildUpdateMessages(memoryKey, currentMemory, history)
 
 	text, err := u.client.Complete(ctx, u.config, messages, 0.2)
 	if err != nil {
 		return "", err
 	}
 	text = normalizeSavedContent(text)
-	if strings.TrimSpace(text) == "" {
-		return "", fmt.Errorf("memory updater returned empty content")
-	}
 	return text, nil
+}
+
+func buildUpdateMessages(memoryKey string, currentMemory string, history []llm.Message) []llm.Message {
+	return []llm.Message{
+		{
+			Role:    "system",
+			Content: strings.TrimSpace(memoryUpdateSystemPrompt),
+		},
+		{
+			Role: "user",
+			Content: strings.TrimSpace(fmt.Sprintf(`
+记忆键：%s
+
+这是记忆内容【
+%s
+】
+
+这是最近的对话【
+%s
+】
+
+请你记住你觉得应该长期记住的内容，并直接输出更新后的完整记忆文件内容。`,
+				strings.TrimSpace(memoryKey),
+				strings.TrimSpace(currentMemory),
+				renderSessionHistory(history),
+			)),
+		},
+	}
 }
 
 func renderSessionHistory(history []llm.Message) string {

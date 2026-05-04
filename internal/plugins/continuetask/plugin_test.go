@@ -58,7 +58,10 @@ func TestContinueTaskRegisterAndCall(t *testing.T) {
 	if result.AsyncTask.ParentTaskID != "task_1" {
 		t.Fatalf("result.AsyncTask.ParentTaskID = %q", result.AsyncTask.ParentTaskID)
 	}
-	if result.AsyncTask.Title != "接续：小游戏网页" {
+	if result.AsyncTask.Title != "再加一个开始按钮" {
 		t.Fatalf("result.AsyncTask.Title = %q", result.AsyncTask.Title)
+	}
+	if result.AsyncTask.Input != "再加一个开始按钮" {
+		t.Fatalf("result.AsyncTask.Input = %q", result.AsyncTask.Input)
 	}
 }

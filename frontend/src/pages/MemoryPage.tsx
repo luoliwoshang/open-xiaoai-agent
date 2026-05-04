@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { BrainCircuit, FilePenLine, History, RefreshCw, Save } from 'lucide-react'
+import { BrainCircuit, ChevronDown, FilePenLine, History, MessagesSquare, RefreshCw, Save } from 'lucide-react'
 import { fetchMemoryFile, fetchMemoryLogs, saveMemoryFile } from '../lib/api'
 import { formatTime } from '../lib/dashboard'
 import type { MemoryManagedFile, MemoryUpdateLog, SettingsSnapshot } from '../types'
@@ -37,16 +37,6 @@ function buildDiffRows(before: string, after: string): DiffRow[] {
   }
 
   return rows
-}
-
-function logPreview(log: MemoryUpdateLog): string {
-  if (Array.isArray(log.messages) && log.messages.length > 0) {
-    const first = log.messages[0]
-    return `${first.role}：${first.content}`
-  }
-  const after = log.after.trim()
-  if (!after) return '手动编辑了记忆文件'
-  return after.split('\n')[0]
 }
 
 export function MemoryPage({ settings }: MemoryPageProps) {
@@ -164,7 +154,7 @@ export function MemoryPage({ settings }: MemoryPageProps) {
               <div>
                 <div className="memory-card-title">记忆正文</div>
                 <div className="memory-card-sub">
-                  {file?.path ? `文件：${file.path}` : '首次读取时会自动创建默认记忆文件'}
+                  {file?.path ? `文件：${file.path}` : '首次读取时会自动创建空白记忆文件'}
                 </div>
               </div>
               <div className="memory-card-actions">
@@ -221,7 +211,7 @@ export function MemoryPage({ settings }: MemoryPageProps) {
                     <span className="memory-log-source">{item.source || 'memory'}</span>
                     <span>{formatTime(item.created_at)}</span>
                   </div>
-                  <div className="memory-log-preview">{logPreview(item)}</div>
+                  <div className="memory-log-preview">{item.preview}</div>
                 </button>
               ))}
             </div>
@@ -231,11 +221,36 @@ export function MemoryPage({ settings }: MemoryPageProps) {
                 <div>
                   <div className="memory-card-title">变更 Diff</div>
                   <div className="memory-card-sub">
-                    {selectedLog ? `${selectedLog.source || 'memory'} · ${formatTime(selectedLog.created_at)}` : '选择一条更新记录后查看'}
+                    {selectedLog ? `${selectedLog.source || 'memory'} · ${selectedLog.source_label || selectedLog.source || 'memory'} · ${formatTime(selectedLog.created_at)}` : '选择一条更新记录后查看'}
                   </div>
                 </div>
                 <History />
               </div>
+              {selectedLog && Array.isArray(selectedLog.summary_context) && selectedLog.summary_context.length > 0 ? (
+                <details className="memory-summary-context" open={selectedLog.source === 'session_summary'}>
+                  <summary className="memory-summary-context-summary">
+                    <div>
+                      <div className="memory-card-title">用于总结的原始对话</div>
+                      <div className="memory-card-sub">
+                        这条 `{selectedLog.source}` 就是基于下面这些消息整理出来的
+                      </div>
+                    </div>
+                    <div className="memory-summary-context-meta">
+                      <MessagesSquare />
+                      <span>{selectedLog.summary_context.length} 条消息</span>
+                      <ChevronDown />
+                    </div>
+                  </summary>
+                  <div className="memory-summary-context-body">
+                    {selectedLog.summary_context.map((message, index) => (
+                      <div key={`${message.role}-${index}`} className="memory-summary-message">
+                        <div className={`memory-summary-role ${message.role}`}>{message.role}</div>
+                        <div className="memory-summary-content">{message.content}</div>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              ) : null}
               <div className="memory-diff-body">
                 {!selectedLog ? (
                   <div className="memory-empty-state">当前页还没有可查看的更新记录。</div>

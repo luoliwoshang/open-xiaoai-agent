@@ -14,6 +14,7 @@ import (
 
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/assistant"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/im"
+	"github.com/luoliwoshang/open-xiaoai-agent/internal/llm"
 	runtimelogs "github.com/luoliwoshang/open-xiaoai-agent/internal/logs"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/memory/filememory"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugin"
@@ -157,9 +158,13 @@ func (f *fakeMemory) ListLogs(query filememory.ListQuery) (filememory.ListPage, 
 				{
 					ID:        "memlog_1",
 					MemoryKey: "main-voice",
-					Source:    "assistant_reply",
-					Before:    "old",
-					After:     "new",
+					Source:    filememory.SessionSummarySource,
+					Messages: []llm.Message{
+						{Role: "assistant", Content: "你好"},
+						{Role: "user", Content: "我的名字是什么？"},
+					},
+					Before: "old",
+					After:  "new",
 				},
 			},
 		}
@@ -665,12 +670,24 @@ func TestHandleMemoryLogsReturnsPage(t *testing.T) {
 		t.Fatalf("lastListQuery = %+v", memoryStore.lastListQuery)
 	}
 
-	var payload filememory.ListPage
+	var payload memoryLogPageResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("Unmarshal() error = %v", err)
 	}
 	if payload.Page != 2 || payload.PageSize != 10 {
 		t.Fatalf("payload = %+v", payload)
+	}
+	if len(payload.Items) != 1 {
+		t.Fatalf("len(payload.Items) = %d, want 1", len(payload.Items))
+	}
+	if payload.Items[0].Preview != "user：我的名字是什么？" {
+		t.Fatalf("payload.Items[0].Preview = %q", payload.Items[0].Preview)
+	}
+	if payload.Items[0].SourceLabel != "会话总结" {
+		t.Fatalf("payload.Items[0].SourceLabel = %q", payload.Items[0].SourceLabel)
+	}
+	if len(payload.Items[0].SummaryContext) != 2 {
+		t.Fatalf("len(payload.Items[0].SummaryContext) = %d, want 2", len(payload.Items[0].SummaryContext))
 	}
 }
 

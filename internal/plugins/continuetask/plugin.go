@@ -129,7 +129,7 @@ func Register(registry *plugin.Registry, manager TaskLookup, resumes *ResumeRegi
 				AsyncTask: &plugin.AsyncTask{
 					Plugin:       taskPlugin,
 					Kind:         strings.TrimSpace(task.Kind),
-					Title:        "接续：" + title,
+					Title:        args.Request,
 					Input:        args.Request,
 					ParentTaskID: task.ID,
 					Run: func(ctx context.Context, reporter plugin.AsyncReporter) (string, error) {

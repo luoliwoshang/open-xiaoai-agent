@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/assistant"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/im"
@@ -23,6 +24,31 @@ import (
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/settings"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/tasks"
 )
+
+type memoryLogMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type memoryLogItem struct {
+	ID             string             `json:"id"`
+	MemoryKey      string             `json:"memory_key"`
+	Source         string             `json:"source"`
+	SourceLabel    string             `json:"source_label"`
+	Preview        string             `json:"preview"`
+	SummaryContext []memoryLogMessage `json:"summary_context,omitempty"`
+	Before         string             `json:"before"`
+	After          string             `json:"after"`
+	CreatedAt      string             `json:"created_at"`
+}
+
+type memoryLogPageResponse struct {
+	Items    []memoryLogItem `json:"items"`
+	Page     int             `json:"page"`
+	PageSize int             `json:"page_size"`
+	Total    int             `json:"total"`
+	HasMore  bool            `json:"has_more"`
+}
 
 type Server struct {
 	addr          string
@@ -515,7 +541,76 @@ func (s *Server) handleMemoryLogs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, result)
+	items := make([]memoryLogItem, 0, len(result.Items))
+	for _, item := range result.Items {
+		items = append(items, buildMemoryLogItem(item))
+	}
+	writeJSON(w, memoryLogPageResponse{
+		Items:    items,
+		Page:     result.Page,
+		PageSize: result.PageSize,
+		Total:    result.Total,
+		HasMore:  result.HasMore,
+	})
+}
+
+func buildMemoryLogItem(item filememory.UpdateLog) memoryLogItem {
+	contextItems := make([]memoryLogMessage, 0, len(item.Messages))
+	for _, message := range item.Messages {
+		role := strings.TrimSpace(message.Role)
+		content := strings.TrimSpace(message.Content)
+		if role == "" || content == "" {
+			continue
+		}
+		contextItems = append(contextItems, memoryLogMessage{
+			Role:    role,
+			Content: content,
+		})
+	}
+	return memoryLogItem{
+		ID:             item.ID,
+		MemoryKey:      item.MemoryKey,
+		Source:         item.Source,
+		SourceLabel:    memoryLogSourceLabel(item.Source),
+		Preview:        memoryLogPreview(item.Source, contextItems, item.After),
+		SummaryContext: contextItems,
+		Before:         item.Before,
+		After:          item.After,
+		CreatedAt:      item.CreatedAt.Format(time.RFC3339),
+	}
+}
+
+func memoryLogSourceLabel(source string) string {
+	switch strings.TrimSpace(source) {
+	case filememory.SessionSummarySource:
+		return "会话总结"
+	case filememory.DashboardManualSource:
+		return "手动编辑"
+	default:
+		if strings.TrimSpace(source) == "" {
+			return "memory"
+		}
+		return strings.TrimSpace(source)
+	}
+}
+
+func memoryLogPreview(source string, messages []memoryLogMessage, after string) string {
+	if strings.TrimSpace(source) == filememory.SessionSummarySource {
+		for _, message := range messages {
+			if strings.EqualFold(strings.TrimSpace(message.Role), "user") {
+				return fmt.Sprintf("%s：%s", message.Role, message.Content)
+			}
+		}
+	}
+	if len(messages) > 0 {
+		return fmt.Sprintf("%s：%s", messages[0].Role, messages[0].Content)
+	}
+	after = strings.TrimSpace(after)
+	if after == "" {
+		return "手动编辑了记忆文件"
+	}
+	lines := strings.Split(after, "\n")
+	return strings.TrimSpace(lines[0])
 }
 
 func (s *Server) handleIMDeliverySettings(w http.ResponseWriter, r *http.Request) {

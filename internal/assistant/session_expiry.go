@@ -5,6 +5,8 @@ import (
 	"log"
 	"strings"
 	"time"
+
+	"github.com/luoliwoshang/open-xiaoai-agent/internal/llm"
 )
 
 const (
@@ -92,5 +94,28 @@ func (s *Service) updateMemoryFromExpiredSession(parent context.Context, snapsho
 		snapshot.StartedAt.Format(time.RFC3339),
 		snapshot.LastActive.Format(time.RFC3339),
 	)
-	return s.memory.UpdateFromSession(ctx, historyKey, snapshot.Messages)
+	log.Printf(
+		"session memory update started: key=%s messages=%d first_user=%q",
+		historyKey,
+		len(snapshot.Messages),
+		firstUserMessagePreview(snapshot.Messages),
+	)
+	if err := s.memory.UpdateFromSession(ctx, historyKey, snapshot.Messages); err != nil {
+		return err
+	}
+	log.Printf(
+		"session memory update completed: key=%s messages=%d",
+		historyKey,
+		len(snapshot.Messages),
+	)
+	return nil
+}
+
+func firstUserMessagePreview(messages []llm.Message) string {
+	for _, message := range messages {
+		if strings.EqualFold(strings.TrimSpace(message.Role), "user") {
+			return previewText(message.Content, 80)
+		}
+	}
+	return ""
 }

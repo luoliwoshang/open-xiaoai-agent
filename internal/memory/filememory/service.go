@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,25 +93,47 @@ func (s *Service) UpdateFromSession(ctx context.Context, memoryKey string, histo
 		return err
 	}
 	before := file.Content
+	log.Printf(
+		"memory file update started: key=%s messages=%d before_chars=%d first_user=%q",
+		memoryKey,
+		len(messages),
+		len([]rune(strings.TrimSpace(before))),
+		firstUserPreview(messages),
+	)
 	after, err := s.updater.UpdateFromSession(ctx, memoryKey, before, messages)
 	if err != nil {
 		return fmt.Errorf("update memory from session: %w", err)
 	}
 	after = normalizeSavedContent(after)
 	if after == before {
+		log.Printf(
+			"memory file update skipped: key=%s messages=%d reason=no_change",
+			memoryKey,
+			len(messages),
+		)
 		return nil
 	}
 	if err := os.WriteFile(file.Path, []byte(after), 0o644); err != nil {
 		return fmt.Errorf("write memory file: %w", err)
 	}
-	return s.appendUpdateLog(UpdateLog{
+	if err := s.appendUpdateLog(UpdateLog{
 		MemoryKey: memoryKey,
 		Source:    SessionSummarySource,
 		Messages:  messages,
 		Before:    before,
 		After:     after,
 		CreatedAt: now,
-	})
+	}); err != nil {
+		return err
+	}
+	log.Printf(
+		"memory file update completed: key=%s messages=%d after_chars=%d path=%s",
+		memoryKey,
+		len(messages),
+		len([]rune(strings.TrimSpace(after))),
+		file.Path,
+	)
+	return nil
 }
 
 func (s *Service) GetFile(memoryKey string) (ManagedFile, error) {
@@ -264,7 +287,7 @@ func (s *Service) ensureMemoryFile(memoryKey string) (string, error) {
 	} else if !os.IsNotExist(err) {
 		return "", fmt.Errorf("stat memory file: %w", err)
 	}
-	if err := os.WriteFile(path, []byte(defaultMemoryContent(memoryKey)), 0o644); err != nil {
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
 		return "", fmt.Errorf("create memory file: %w", err)
 	}
 	return path, nil
@@ -370,24 +393,25 @@ func normalizeMessages(messages []llm.Message) []llm.Message {
 	return items
 }
 
-func defaultMemoryContent(memoryKey string) string {
-	return strings.TrimSpace(fmt.Sprintf(`
-# XiaoAiAgent Memory
+func firstUserPreview(messages []llm.Message) string {
+	for _, message := range messages {
+		if strings.EqualFold(strings.TrimSpace(message.Role), "user") {
+			return previewLogText(message.Content, 80)
+		}
+	}
+	return ""
+}
 
-这是一份可直接编辑的长期记忆文件。
-
-- 记忆键：%s
-- 你可以在“长期记忆”部分维护希望系统长期记住的信息。
-- 系统会在 session 结束后整理一次会话重点，并按需要更新长期记忆。
-
-## 长期记忆
-
-请在这里补充需要长期保留的背景信息、偏好、固定环境说明、常用服务地址、口令备注（如果你确认这样存储是安全的）等内容。
-
-## 最近一次会话整理
-
-当前还没有整理记录。
-`, strings.TrimSpace(memoryKey))) + "\n"
+func previewLogText(text string, limit int) string {
+	text = strings.TrimSpace(text)
+	if limit <= 0 {
+		limit = 80
+	}
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	return strings.TrimSpace(string(runes[:limit])) + "..."
 }
 
 func normalizeSavedContent(content string) string {
