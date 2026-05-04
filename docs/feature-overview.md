@@ -50,6 +50,7 @@
 
 - 支持把用户输入路由成普通聊天、工具调用、异步任务、继续任务、查询任务等不同路径
 - 工具结果通常不会原样机械播报，而是经过 `reply` 模型整理后再回复
+- `continue_task` 的候选不是零散 task 行，而是按任务链折叠后的快照
 - 当前内置工具包括：
   - `ask_weather`
   - `ask_stock`
@@ -58,6 +59,10 @@
   - `query_task_progress`
   - `cancel_task`
   - `continue_task`
+
+工具意图识别的具体拼接方式，可参考：
+
+- `docs/tool-intent-routing.md`
 
 ### 2.4 异步任务系统
 

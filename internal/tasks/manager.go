@@ -23,6 +23,16 @@ type Manager struct {
 	onResultReportReady func()
 }
 
+type intentTaskChainSnapshot struct {
+	LatestTaskID    string
+	Plugin          string
+	RootTitle       string
+	RootInput       string
+	RecentFollowups []string
+	LatestSummary   string
+	LatestUpdatedAt time.Time
+}
+
 func NewManager(dsn string, artifactCacheDir string) (*Manager, error) {
 	store, err := NewStore(dsn)
 	if err != nil {
@@ -235,21 +245,22 @@ func (m *Manager) GetTask(taskID string) (*Task, bool) {
 	return nil, false
 }
 
+// CompletedTasksForIntent 生成“给 intent 模型看的最近已完成任务列表”。
+//
+// 这份列表不是给前端展示，也不是给 continue_task 执行阶段直接复用，
+// 而是专门给意图识别阶段做任务接续候选上下文：
+// 1. 先从内存态里拿到当前全部任务；
+// 2. 按 parent_task_id 把任务折叠成“任务链快照”，避免同一条链的旧节点重复进入 prompt；
+// 3. 每条快照只暴露这条链“最新的已完成节点”，并同时保留根任务输入和最近续做要求；
+// 4. 如果一条链最新节点不是 completed，则整条链暂时不进入 continue_task 候选；
+// 5. 最后按最新节点 UpdatedAt 从新到旧排序，并按 limit 截断。
 func (m *Manager) CompletedTasksForIntent(limit int) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	tasks := append([]Task(nil), m.state.Tasks...)
-	sort.Slice(tasks, func(i, j int) bool {
-		return tasks[i].UpdatedAt.After(tasks[j].UpdatedAt)
-	})
-
 	var items []string
-	for _, task := range tasks {
-		if task.State != StateCompleted {
-			continue
-		}
-		items = append(items, formatCompletedTaskForIntent(task))
+	for _, snapshot := range buildIntentTaskChainSnapshots(m.state.Tasks, limit) {
+		items = append(items, formatIntentTaskChainSnapshot(snapshot))
 		if len(items) >= limit {
 			break
 		}
@@ -257,7 +268,7 @@ func (m *Manager) CompletedTasksForIntent(limit int) string {
 	if len(items) == 0 {
 		return ""
 	}
-	return "最近已完成任务列表如下。如果用户现在是在补充、修改、继续之前做完的任务，请优先从下面选择最匹配的任务并调用 continue_task：\n" + strings.Join(items, "\n")
+	return "下面是最近可继续的任务链快照。每条只代表一条任务链当前最新的已完成节点。\n如果用户现在是在补充、修改、继续之前已经做完的任务，请优先从下面选择最匹配的一条，并调用 continue_task。\n注意：调用 continue_task 时，task_id 必须填写 latest_task_id，plugin_name 必须填写 plugin，不要自己编造。\n\n" + strings.Join(items, "\n\n")
 }
 
 func formatProgressItem(task Task) string {
@@ -277,15 +288,217 @@ func formatProgressItem(task Task) string {
 	)
 }
 
-func formatCompletedTaskForIntent(task Task) string {
-	title := strings.TrimSpace(task.Title)
-	if title == "" {
-		title = "未命名任务"
+// formatIntentTaskChainSnapshot 把单条任务链快照压缩成给 intent 模型看的候选块。
+//
+// 它同时保留两层信息：
+// 1. 根任务语义锚点：root_title / root_input
+// 2. 当前最新完成状态：latest_task_id / recent_followups / latest_summary
+//
+// 这样模型既能按“原始想做什么”命中任务，也能按“最近改到哪一步”命中同一条链。
+func formatIntentTaskChainSnapshot(snapshot intentTaskChainSnapshot) string {
+	followups := "无"
+	if len(snapshot.RecentFollowups) > 0 {
+		followups = strings.Join(snapshot.RecentFollowups, "；")
 	}
+	return fmt.Sprintf(
+		"- latest_task_id=%s\n  plugin=%s\n  root_title=%s\n  root_input=%s\n  recent_followups=%s\n  latest_summary=%s",
+		snapshot.LatestTaskID,
+		snapshot.Plugin,
+		snapshot.RootTitle,
+		snapshot.RootInput,
+		followups,
+		snapshot.LatestSummary,
+	)
+}
+
+// buildIntentTaskChainSnapshots 把零散 task 行折叠成“给 continue_task 用的任务链快照”。
+//
+// 当前策略是：
+// 1. 先按 parent_task_id 找到根任务，把同一条链上的节点归并到一起；
+// 2. 每条链只保留一个对外候选，对应这条链当前最新的已完成节点；
+// 3. 如果这条链最新节点不是 completed，则整条链暂不进入 continue_task 候选；
+// 4. 快照里同时保留根任务输入和最近续做要求，兼顾原始目标和最近修改语义。
+func buildIntentTaskChainSnapshots(tasks []Task, limit int) []intentTaskChainSnapshot {
+	if limit <= 0 || len(tasks) == 0 {
+		return nil
+	}
+
+	byID := make(map[string]Task, len(tasks))
+	for _, task := range tasks {
+		if strings.TrimSpace(task.ID) == "" {
+			continue
+		}
+		byID[task.ID] = task
+	}
+
+	chains := make(map[string][]Task)
+	for _, task := range tasks {
+		if strings.TrimSpace(task.ID) == "" {
+			continue
+		}
+		rootID := resolveIntentTaskChainRootID(task, byID)
+		chains[rootID] = append(chains[rootID], task)
+	}
+
+	snapshots := make([]intentTaskChainSnapshot, 0, len(chains))
+	for rootID, chainTasks := range chains {
+		latest := latestTaskByUpdatedAt(chainTasks)
+		if strings.TrimSpace(latest.ID) == "" || latest.State != StateCompleted {
+			continue
+		}
+
+		root := rootTaskForIntent(rootID, chainTasks, byID)
+		snapshots = append(snapshots, intentTaskChainSnapshot{
+			LatestTaskID:    latest.ID,
+			Plugin:          taskPluginForIntent(latest),
+			RootTitle:       taskTitleForIntent(root),
+			RootInput:       taskInputForIntent(root),
+			RecentFollowups: recentFollowupsForIntent(chainTasks, root.ID),
+			LatestSummary:   taskSummaryForIntent(latest),
+			LatestUpdatedAt: latest.UpdatedAt,
+		})
+	}
+
+	sort.Slice(snapshots, func(i, j int) bool {
+		return snapshots[i].LatestUpdatedAt.After(snapshots[j].LatestUpdatedAt)
+	})
+	if len(snapshots) > limit {
+		snapshots = snapshots[:limit]
+	}
+	return snapshots
+}
+
+func resolveIntentTaskChainRootID(task Task, byID map[string]Task) string {
+	current := task
+	visited := make(map[string]struct{})
+	for {
+		currentID := strings.TrimSpace(current.ID)
+		if currentID == "" {
+			return strings.TrimSpace(task.ID)
+		}
+		if _, ok := visited[currentID]; ok {
+			return currentID
+		}
+		visited[currentID] = struct{}{}
+
+		parentID := strings.TrimSpace(current.ParentTaskID)
+		if parentID == "" {
+			return currentID
+		}
+
+		parent, ok := byID[parentID]
+		if !ok {
+			return currentID
+		}
+		current = parent
+	}
+}
+
+func rootTaskForIntent(rootID string, chainTasks []Task, byID map[string]Task) Task {
+	if root, ok := byID[strings.TrimSpace(rootID)]; ok {
+		return root
+	}
+	if len(chainTasks) == 0 {
+		return Task{}
+	}
+
+	root := chainTasks[0]
+	for _, task := range chainTasks[1:] {
+		if task.CreatedAt.Before(root.CreatedAt) {
+			root = task
+			continue
+		}
+		if task.CreatedAt.Equal(root.CreatedAt) && task.UpdatedAt.Before(root.UpdatedAt) {
+			root = task
+		}
+	}
+	return root
+}
+
+func latestTaskByUpdatedAt(tasks []Task) Task {
+	if len(tasks) == 0 {
+		return Task{}
+	}
+	latest := tasks[0]
+	for _, task := range tasks[1:] {
+		if task.UpdatedAt.After(latest.UpdatedAt) {
+			latest = task
+			continue
+		}
+		if task.UpdatedAt.Equal(latest.UpdatedAt) && task.CreatedAt.After(latest.CreatedAt) {
+			latest = task
+		}
+	}
+	return latest
+}
+
+func recentFollowupsForIntent(chainTasks []Task, rootTaskID string) []string {
+	type followup struct {
+		input     string
+		updatedAt time.Time
+	}
+
+	var items []followup
+	rootTaskID = strings.TrimSpace(rootTaskID)
+	for _, task := range chainTasks {
+		if strings.TrimSpace(task.ID) == "" || strings.TrimSpace(task.ID) == rootTaskID {
+			continue
+		}
+		input := compactTaskText(task.Input)
+		if input == "" {
+			continue
+		}
+		items = append(items, followup{
+			input:     input,
+			updatedAt: task.UpdatedAt,
+		})
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].updatedAt.Before(items[j].updatedAt)
+	})
+	if len(items) > 3 {
+		items = items[len(items)-3:]
+	}
+
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		result = append(result, item.input)
+	}
+	return result
+}
+
+func taskPluginForIntent(task Task) string {
 	pluginName := strings.TrimSpace(task.Plugin)
 	if pluginName == "" {
 		pluginName = strings.TrimSpace(task.Kind)
 	}
+	if pluginName == "" {
+		pluginName = "unknown_plugin"
+	}
+	return pluginName
+}
+
+func taskTitleForIntent(task Task) string {
+	title := strings.TrimSpace(task.Title)
+	if title == "" {
+		title = strings.TrimSpace(task.Kind)
+	}
+	if title == "" {
+		title = "未命名任务"
+	}
+	return compactTaskText(title)
+}
+
+func taskInputForIntent(task Task) string {
+	input := compactTaskText(task.Input)
+	if input == "" {
+		return "无"
+	}
+	return input
+}
+
+func taskSummaryForIntent(task Task) string {
 	summary := compactTaskText(task.Summary)
 	if summary == "" {
 		summary = compactTaskText(task.Result)
@@ -293,14 +506,7 @@ func formatCompletedTaskForIntent(task Task) string {
 	if summary == "" {
 		summary = "暂无摘要"
 	}
-
-	return fmt.Sprintf(
-		"- task_id=%s plugin=%s title=%s summary=%s",
-		task.ID,
-		pluginName,
-		title,
-		summary,
-	)
+	return summary
 }
 
 func (m *Manager) BuildResultReport(limit int) (string, []string) {
