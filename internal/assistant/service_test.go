@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/llm"
+	"github.com/luoliwoshang/open-xiaoai-agent/internal/memory"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugin"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/tasks"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/voice"
@@ -121,6 +123,12 @@ func (f fakeTools) Call(ctx context.Context, name string, arguments json.RawMess
 		return f.onCall(name), nil
 	}
 	return plugin.Result{}, nil
+}
+
+type toolRunnerFunc func(ctx context.Context, name string, arguments json.RawMessage) (plugin.Result, error)
+
+func (f toolRunnerFunc) Call(ctx context.Context, name string, arguments json.RawMessage) (plugin.Result, error) {
+	return f(ctx, name, arguments)
 }
 
 type fakeTaskManager struct {
@@ -256,14 +264,62 @@ func (f *fakeArtifactDeliverer) DeliverTaskArtifact(accountID string, targetID s
 	return "msg_1", nil
 }
 
-func newTestService(t *testing.T, config Config, intent IntentDecider, reply ReplyStreamer, tools ToolRunner, taskManager TaskManager, artifactDeliverer ArtifactDeliverySender) *Service {
+type fakeMemoryService struct {
+	recallText string
+
+	mu         sync.Mutex
+	recallKeys []string
+	updated    []expiredSessionUpdate
+}
+
+type expiredSessionUpdate struct {
+	MemoryKey string
+	History   []llm.Message
+}
+
+func (f *fakeMemoryService) Recall(ctx context.Context, memoryKey string) (string, error) {
+	_ = ctx
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recallKeys = append(f.recallKeys, memoryKey)
+	return f.recallText, nil
+}
+
+func (f *fakeMemoryService) UpdateFromSession(ctx context.Context, memoryKey string, history []llm.Message) error {
+	_ = ctx
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	item := expiredSessionUpdate{
+		MemoryKey: memoryKey,
+		History:   append([]llm.Message(nil), history...),
+	}
+	f.updated = append(f.updated, item)
+	return nil
+}
+
+func (f *fakeMemoryService) snapshotUpdated() []expiredSessionUpdate {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	items := make([]expiredSessionUpdate, len(f.updated))
+	copy(items, f.updated)
+	return items
+}
+
+func newTestServiceWithMemory(t *testing.T, config Config, intent IntentDecider, reply ReplyStreamer, tools ToolRunner, taskManager TaskManager, artifactDeliverer ArtifactDeliverySender, memoryService memory.Service) *Service {
 	t.Helper()
 
-	service, err := New(config, staticSessionWindow{window: 5 * time.Minute}, intent, reply, tools, taskManager, nil, artifactDeliverer)
+	service, err := New(config, staticSessionWindow{window: 5 * time.Minute}, intent, reply, tools, taskManager, nil, artifactDeliverer, memoryService)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	t.Cleanup(service.Close)
 	return service
+}
+
+func newTestService(t *testing.T, config Config, intent IntentDecider, reply ReplyStreamer, tools ToolRunner, taskManager TaskManager, artifactDeliverer ArtifactDeliverySender) *Service {
+	t.Helper()
+
+	return newTestServiceWithMemory(t, config, intent, reply, tools, taskManager, artifactDeliverer, nil)
 }
 
 func waitUntil(t *testing.T, timeout time.Duration, fn func() bool) {
@@ -493,6 +549,168 @@ func TestHandleUserTextDoesNotPrepareTwiceForToolCall(t *testing.T) {
 	}
 	if !toolReplyCalled {
 		t.Fatal("toolReplyCalled = false, want true")
+	}
+}
+
+func TestHandleUserTextUsesMemoryForReplyButNotIntent(t *testing.T) {
+	t.Parallel()
+
+	memoryService := &fakeMemoryService{
+		recallText: "用户常用的 Home Assistant 地址是 https://ha.example.com",
+	}
+	intentHistoryChecked := false
+	replyHistoryChecked := false
+
+	service := newTestServiceWithMemory(t,
+		Config{AbortAfterASR: false, PostAbortDelay: 0},
+		fakeIntent{
+			onDecide: func(history []llm.Message, text string) llm.IntentDecision {
+				_ = text
+				intentHistoryChecked = true
+				if len(history) != 0 {
+					t.Fatalf("intent history should not contain memory system message, got %#v", history)
+				}
+				return llm.IntentDecision{ShouldHandle: false}
+			},
+		},
+		scriptedReply{
+			onStream: func(ctx context.Context, history []llm.Message, text string, onDelta func(string) error) error {
+				_ = ctx
+				_ = text
+				replyHistoryChecked = true
+				if len(history) == 0 {
+					t.Fatal("reply history is empty, want prepended memory message")
+				}
+				if history[0].Role != "system" || !strings.Contains(history[0].Content, "Home Assistant") {
+					t.Fatalf("reply memory message = %+v", history[0])
+				}
+				return onDelta("你好。")
+			},
+		},
+		fakeTools{},
+		&fakeTaskManager{},
+		nil,
+		memoryService,
+	)
+
+	service.handleUserText(testHistoryKey, &fakeChannel{}, "帮我记一下")
+
+	if !intentHistoryChecked {
+		t.Fatal("intent history was not checked")
+	}
+	if !replyHistoryChecked {
+		t.Fatal("reply history was not checked")
+	}
+}
+
+func TestHandleUserTextPassesMemoryToToolContextWithoutImmediateSessionSummary(t *testing.T) {
+	t.Parallel()
+
+	memoryService := &fakeMemoryService{
+		recallText: "用户偏好：尽量用中文，不要暴露内部路径。",
+	}
+	toolMemoryChecked := false
+
+	service := newTestServiceWithMemory(t,
+		Config{AbortAfterASR: false, PostAbortDelay: 0},
+		fakeIntent{
+			onDecide: func(history []llm.Message, text string) llm.IntentDecision {
+				_ = history
+				_ = text
+				return llm.IntentDecision{
+					ShouldHandle: true,
+					ShouldAbort:  false,
+					ToolCall: &llm.ToolCall{
+						Name:      "ask_weather",
+						Arguments: json.RawMessage(`{"city":"上海"}`),
+					},
+				}
+			},
+		},
+		fakeReply{},
+		fakeTools{
+			onCall: func(name string) plugin.Result {
+				return plugin.Result{
+					Text:       fmt.Sprintf("%s 可以直接回复。", name),
+					OutputMode: plugin.OutputModeDirect,
+				}
+			},
+		},
+		&fakeTaskManager{},
+		nil,
+		memoryService,
+	)
+
+	originalTools := service.tools
+	service.tools = toolRunnerFunc(func(ctx context.Context, name string, arguments json.RawMessage) (plugin.Result, error) {
+		memoryCtx, ok := plugin.MemoryFromContext(ctx)
+		if !ok {
+			t.Fatal("tool context missing memory")
+		}
+		if memoryCtx.Key != testHistoryKey {
+			t.Fatalf("memoryCtx.Key = %q, want %q", memoryCtx.Key, testHistoryKey)
+		}
+		if !strings.Contains(memoryCtx.Text, "尽量用中文") {
+			t.Fatalf("memoryCtx.Text = %q", memoryCtx.Text)
+		}
+		toolMemoryChecked = true
+		return originalTools.Call(ctx, name, arguments)
+	})
+
+	service.handleUserText(testHistoryKey, &fakeChannel{}, "上海天气怎么样")
+
+	if !toolMemoryChecked {
+		t.Fatal("tool memory context was not checked")
+	}
+	updated := memoryService.snapshotUpdated()
+	if len(updated) != 0 {
+		t.Fatalf("len(updated) = %d, want 0 before session expiry", len(updated))
+	}
+}
+
+func TestProcessExpiredSessionsUpdatesMemoryFromWholeSessionHistory(t *testing.T) {
+	t.Parallel()
+
+	memoryService := &fakeMemoryService{}
+	service := newTestServiceWithMemory(t,
+		Config{AbortAfterASR: false, PostAbortDelay: 0},
+		fakeIntent{},
+		fakeReply{},
+		fakeTools{},
+		&fakeTaskManager{},
+		nil,
+		memoryService,
+	)
+
+	pending := service.processExpiredSessions(context.Background(), []ConversationSnapshot{
+		{
+			ID:         testHistoryKey,
+			StartedAt:  time.Unix(100, 0),
+			LastActive: time.Unix(120, 0),
+			Messages: []llm.Message{
+				{Role: "user", Content: "我家里的 Home Assistant 地址是 https://ha.example.com"},
+				{Role: "assistant", Content: "好的，我知道了。"},
+				{Role: "user", Content: "另外以后尽量都用中文回答。"},
+				{Role: "assistant", Content: "没问题。"},
+			},
+		},
+	})
+	if len(pending) != 0 {
+		t.Fatalf("len(pending) = %d, want 0", len(pending))
+	}
+
+	updated := memoryService.snapshotUpdated()
+	if len(updated) != 1 {
+		t.Fatalf("len(updated) = %d, want 1", len(updated))
+	}
+	if updated[0].MemoryKey != testHistoryKey {
+		t.Fatalf("MemoryKey = %q, want %q", updated[0].MemoryKey, testHistoryKey)
+	}
+	if len(updated[0].History) != 4 {
+		t.Fatalf("len(updated[0].History) = %d, want 4", len(updated[0].History))
+	}
+	if updated[0].History[0].Role != "user" || !strings.Contains(updated[0].History[0].Content, "Home Assistant") {
+		t.Fatalf("updated history = %#v", updated[0].History)
 	}
 }
 

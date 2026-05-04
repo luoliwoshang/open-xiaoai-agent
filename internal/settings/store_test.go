@@ -22,6 +22,9 @@ func TestNewStoreLoadsDefaultSessionWindowSeconds(t *testing.T) {
 	if store.SessionWindow() != 300*time.Second {
 		t.Fatalf("SessionWindow() = %s, want 300s", store.SessionWindow())
 	}
+	if snapshot.MemoryStorageDir == "" {
+		t.Fatal("MemoryStorageDir = empty, want default value")
+	}
 }
 
 func TestStoreUpdateSessionWindowSeconds(t *testing.T) {
@@ -32,6 +35,12 @@ func TestStoreUpdateSessionWindowSeconds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}
+	if _, err := store.UpdateIMDelivery(true, "account_1", "target_1"); err != nil {
+		t.Fatalf("UpdateIMDelivery() error = %v", err)
+	}
+	if _, err := store.UpdateMemoryStorageDir("/tmp/xiaoai-memory"); err != nil {
+		t.Fatalf("UpdateMemoryStorageDir() error = %v", err)
+	}
 
 	snapshot, err := store.UpdateSessionWindowSeconds(420)
 	if err != nil {
@@ -40,6 +49,12 @@ func TestStoreUpdateSessionWindowSeconds(t *testing.T) {
 	if snapshot.SessionWindowSeconds != 420 {
 		t.Fatalf("SessionWindowSeconds = %d, want 420", snapshot.SessionWindowSeconds)
 	}
+	if !snapshot.IMDeliveryEnabled || snapshot.IMSelectedAccountID != "account_1" || snapshot.IMSelectedTargetID != "target_1" {
+		t.Fatalf("snapshot IM delivery fields were not preserved: %+v", snapshot)
+	}
+	if snapshot.MemoryStorageDir != "/tmp/xiaoai-memory" {
+		t.Fatalf("MemoryStorageDir = %q, want /tmp/xiaoai-memory", snapshot.MemoryStorageDir)
+	}
 
 	reloaded, err := NewStore(dsn)
 	if err != nil {
@@ -47,6 +62,12 @@ func TestStoreUpdateSessionWindowSeconds(t *testing.T) {
 	}
 	if reloaded.Snapshot().SessionWindowSeconds != 420 {
 		t.Fatalf("reloaded SessionWindowSeconds = %d, want 420", reloaded.Snapshot().SessionWindowSeconds)
+	}
+	if !reloaded.Snapshot().IMDeliveryEnabled || reloaded.Snapshot().IMSelectedAccountID != "account_1" || reloaded.Snapshot().IMSelectedTargetID != "target_1" {
+		t.Fatalf("reloaded IM delivery fields were not preserved: %+v", reloaded.Snapshot())
+	}
+	if reloaded.Snapshot().MemoryStorageDir != "/tmp/xiaoai-memory" {
+		t.Fatalf("reloaded MemoryStorageDir = %q, want /tmp/xiaoai-memory", reloaded.Snapshot().MemoryStorageDir)
 	}
 }
 
@@ -116,5 +137,31 @@ func TestStoreRejectsInvalidIMDeliveryWhenEnabled(t *testing.T) {
 	}
 	if _, err := store.UpdateIMDelivery(true, "account_1", ""); err == nil {
 		t.Fatal("UpdateIMDelivery() error = nil, want error for missing target id")
+	}
+}
+
+func TestStoreUpdateMemoryStorageDir(t *testing.T) {
+	t.Parallel()
+
+	dsn := testmysql.NewDSN(t)
+	store, err := NewStore(dsn)
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+
+	snapshot, err := store.UpdateMemoryStorageDir("/tmp/xiaoai-memory")
+	if err != nil {
+		t.Fatalf("UpdateMemoryStorageDir() error = %v", err)
+	}
+	if snapshot.MemoryStorageDir != "/tmp/xiaoai-memory" {
+		t.Fatalf("MemoryStorageDir = %q, want /tmp/xiaoai-memory", snapshot.MemoryStorageDir)
+	}
+
+	reloaded, err := NewStore(dsn)
+	if err != nil {
+		t.Fatalf("reload NewStore() error = %v", err)
+	}
+	if reloaded.Snapshot().MemoryStorageDir != "/tmp/xiaoai-memory" {
+		t.Fatalf("reloaded MemoryStorageDir = %q, want /tmp/xiaoai-memory", reloaded.Snapshot().MemoryStorageDir)
 	}
 }

@@ -126,7 +126,7 @@ func TestStreamParserHandlesClaudeOutput(t *testing.T) {
 func TestBuildClaudePrompt(t *testing.T) {
 	t.Parallel()
 
-	prompt := buildClaudePrompt("task_1", "帮我做一个网页")
+	prompt := buildClaudePrompt("task_1", "帮我做一个网页", "")
 	for _, expected := range []string{
 		"执行以下任务：帮我做一个网页",
 		"进度汇报要相对简短",
@@ -149,7 +149,7 @@ func TestBuildClaudePrompt(t *testing.T) {
 func TestBuildClaudeResumePrompt(t *testing.T) {
 	t.Parallel()
 
-	prompt := buildClaudeResumePrompt("task_2", "把刚刚那个网页再加一个按钮")
+	prompt := buildClaudeResumePrompt("task_2", "把刚刚那个网页再加一个按钮", "")
 	for _, expected := range []string{
 		"继续基于刚才已经完成的同一个任务接着处理",
 		"补充要求如下：把刚刚那个网页再加一个按钮",

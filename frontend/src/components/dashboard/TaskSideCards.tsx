@@ -1,5 +1,5 @@
-import { Clock, FileDown, Bot, MessageCircle, Download } from 'lucide-react'
-import type { Task, TaskEvent, TaskArtifact, ClaudeRecord, ConversationSnapshot } from '../../types'
+import { Clock, FileDown, Bot, Download } from 'lucide-react'
+import type { Task, TaskEvent, TaskArtifact, ClaudeRecord } from '../../types'
 import { formatTime, formatBytes } from '../../lib/dashboard'
 import { EmptyState } from '../ui/EmptyState'
 
@@ -8,15 +8,13 @@ interface TaskSideCardsProps {
   events: TaskEvent[]
   artifacts: TaskArtifact[]
   claudeRecords: ClaudeRecord[]
-  conversations: ConversationSnapshot[]
 }
 
-export function TaskSideCards({ task, events, artifacts, claudeRecords, conversations }: TaskSideCardsProps) {
+export function TaskSideCards({ task, events, artifacts, claudeRecords }: TaskSideCardsProps) {
   const taskId = task?.id
   const taskEvents = taskId ? events.filter((e) => e.task_id === taskId).slice(0, 6) : []
   const taskArtifacts = taskId ? artifacts.filter((a) => a.task_id === taskId).slice(0, 4) : []
   const taskClaude = taskId ? claudeRecords.find((c) => c.task_id === taskId) : null
-  const activeConversation = conversations[0]
 
   return (
     <div className="side-cards">
@@ -110,30 +108,6 @@ export function TaskSideCards({ task, events, artifacts, claudeRecords, conversa
                   <span className="claude-value">{taskClaude.last_summary}</span>
                 </div>
               )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Recent Conversation */}
-      <div className="section-card">
-        <div className="section-card-header">
-          <div className="section-card-title">
-            <MessageCircle />
-            近期对话
-          </div>
-        </div>
-        <div className="section-card-body">
-          {!activeConversation || activeConversation.messages.length === 0 ? (
-            <EmptyState title="暂无对话" />
-          ) : (
-            <div className="conversation-bubbles">
-              {activeConversation.messages.slice(-3).map((msg, i) => (
-                <div key={i} className={`bubble ${msg.role}`}>
-                  <div className="bubble-role">{msg.role === 'user' ? '用户' : '助理'}</div>
-                  {msg.content.length > 120 ? msg.content.slice(0, 120) + '...' : msg.content}
-                </div>
-              ))}
             </div>
           )}
         </div>

@@ -23,6 +23,7 @@
 - 执行 `intent` 路由，分流到工具 / 异步任务 / 任务继续等路径
 - 生成普通对话回复，以及工具结果总结回复
 - 通过现有 client 协议驱动设备侧本地 TTS 播放
+- 提供主流程长期记忆，并让 reply / complex_task 复用它
 - 维护轻量异步任务系统
 - 提供一期 IM 网关能力：支持微信文本投递，以及默认渠道的图片 / 文件调试发送
 - 持久化后端运行日志，并通过 dashboard API 暴露出来
@@ -80,6 +81,11 @@
   - reply 生成器
 - `internal/plugin`
   - tool / async-task 注册中心
+- `internal/memory`
+  - assistant 依赖的最小记忆抽象接口
+- `internal/memory/filememory`
+  - 当前默认文件型记忆实现
+  - 记忆文件管理与更新日志
 - `internal/plugins`
   - 实际内置工具
   - 每个 plugin 都在自己的子目录里
@@ -186,6 +192,7 @@ go run .
 - 运行时设置，例如 `session.window_seconds`
 - 后端运行日志
 - IM 网关账号 / 目标 / 事件
+- 长期记忆更新日志
 
 ### 各类存储的含义
 
@@ -218,7 +225,15 @@ go run .
   - `im.delivery.enabled`
   - `im.delivery.selected_account_id`
   - `im.delivery.selected_target_id`
+  - `memory.storage_dir`
 - 服务启动时应确保默认设置行存在
+
+长期记忆存储：
+
+- 当前默认实现是本地 Markdown 文件
+- 文件目录来自 settings 表里的 `memory.storage_dir`
+- 当前主流程默认 memory key 是 `main-voice`
+- dashboard 的手动编辑与 diff 日志查看能力属于 `internal/memory/filememory` 这个实现者，不属于抽象接口
 
 IM 网关存储：
 
@@ -332,6 +347,14 @@ Reply 阶段：
 - 用于普通聊天
 - 用于整理普通工具输出
 - 用于任务结果汇报
+- 会读取当前 historyKey 对应的长期记忆
+
+长期记忆行为：
+
+- intent 当前不读取长期记忆
+- reply 会把召回的长期记忆作为 system message 拼进上下文
+- 短期会话窗口超时结束后，会把那次完整 history 低频整理进长期记忆
+- `complex_task` / `continue_task` 会把这份长期记忆继续传给执行器
 
 Speculative 行为：
 
@@ -346,7 +369,6 @@ Plugins 通过 `internal/plugins/register.go` 注册。
 
 - `continue_chat`
 - `ask_weather`
-- `ask_stock`
 - `list_tools`
 - `complex_task`
 - `query_task_progress`
@@ -525,6 +547,10 @@ Dashboard 的定位必须保持明确：
 - `GET /api/tasks/{taskID}/artifacts/{artifactID}/download`
 - `GET /api/settings`
 - `POST /api/settings/session`
+- `POST /api/settings/memory`
+- `GET /api/memory/file`
+- `POST /api/memory/file`
+- `GET /api/memory/logs`
 - `POST /api/settings/im-delivery`
 - `POST /api/im/wechat/login/start`
 - `GET /api/im/wechat/login/status`
@@ -559,6 +585,7 @@ Dashboard 的定位必须保持明确：
 - dashboard 状态应暴露 assistant 语音通道运行时状态，例如 busy / result-report-ready / has-voice-channel
 - dashboard 首页可以提供一个手动 ASR-debug 输入入口，把识别文本注入当前 assistant 流程，使用共享的 `main-voice` 会话上下文和专用 debug voice channel
 - dashboard 还可以暴露当前 XiaoAI websocket 连接状态，方便操作者快速确认设备桥是否在线
+- dashboard 可以提供单独的长期记忆页面，用来查看 `main-voice` 记忆文件、手动编辑正文和查看更新日志 diff
 
 ## 前端 UI 风格
 
@@ -581,7 +608,7 @@ GOCACHE=$(pwd)/.gocache go test ./...
 前端校验：
 
 ```sh
-npm run build:web
+npm run build:fe
 ```
 
 说明：

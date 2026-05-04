@@ -79,7 +79,7 @@ func (r *IntentRecognizer) Decide(ctx context.Context, history []Message, text s
 	if r.tools != nil {
 		// 这里取到的是“当前系统里已经注册好的工具定义”。
 		// 它们通常来自 plugin.Registry.Definitions()：
-		// registry 先在启动阶段注册 weather / stock / complex_task / continue_task 等工具，
+		// registry 先在启动阶段注册 weather / complex_task / continue_task 等工具，
 		// 这里再把这些工具的 name / description / input schema 提供给 intent 模型。
 		//
 		// 也就是说：

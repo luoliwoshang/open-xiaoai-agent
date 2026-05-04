@@ -14,7 +14,9 @@ import (
 
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/assistant"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/im"
+	"github.com/luoliwoshang/open-xiaoai-agent/internal/llm"
 	runtimelogs "github.com/luoliwoshang/open-xiaoai-agent/internal/logs"
+	"github.com/luoliwoshang/open-xiaoai-agent/internal/memory/filememory"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugin"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugins/complextask"
 	agentserver "github.com/luoliwoshang/open-xiaoai-agent/internal/server"
@@ -75,6 +77,14 @@ func (f *fakeSettings) UpdateSessionWindowSeconds(seconds int) (settings.Snapsho
 	return f.snapshot, nil
 }
 
+func (f *fakeSettings) UpdateMemoryStorageDir(dir string) (settings.Snapshot, error) {
+	if err := settings.ValidateMemoryStorageDir(dir); err != nil {
+		return settings.Snapshot{}, err
+	}
+	f.snapshot.MemoryStorageDir = dir
+	return f.snapshot, nil
+}
+
 func (f *fakeSettings) UpdateIMDelivery(enabled bool, accountID string, targetID string) (settings.Snapshot, error) {
 	if err := settings.ValidateIMDelivery(enabled, accountID, targetID); err != nil {
 		return settings.Snapshot{}, err
@@ -100,6 +110,66 @@ type fakeIM struct {
 type fakeLogs struct {
 	lastQuery runtimelogs.ListQuery
 	page      runtimelogs.ListPage
+}
+
+type fakeMemory struct {
+	file              filememory.ManagedFile
+	page              filememory.ListPage
+	lastGetMemoryKey  string
+	lastSaveMemoryKey string
+	lastSaveContent   string
+	lastSaveSource    string
+	lastListQuery     filememory.ListQuery
+}
+
+func (f *fakeMemory) GetFile(memoryKey string) (filememory.ManagedFile, error) {
+	f.lastGetMemoryKey = memoryKey
+	if f.file.MemoryKey == "" {
+		f.file = filememory.ManagedFile{
+			MemoryKey: memoryKey,
+			Path:      "/tmp/main-voice.md",
+			Content:   "# XiaoAiAgent Memory\n",
+		}
+	}
+	return f.file, nil
+}
+
+func (f *fakeMemory) SaveFile(memoryKey string, content string, source string) (filememory.ManagedFile, error) {
+	f.lastSaveMemoryKey = memoryKey
+	f.lastSaveContent = content
+	f.lastSaveSource = source
+	f.file = filememory.ManagedFile{
+		MemoryKey: memoryKey,
+		Path:      "/tmp/main-voice.md",
+		Content:   content,
+	}
+	return f.file, nil
+}
+
+func (f *fakeMemory) ListLogs(query filememory.ListQuery) (filememory.ListPage, error) {
+	f.lastListQuery = query
+	if f.page.Page == 0 {
+		f.page = filememory.ListPage{
+			Page:     query.Page,
+			PageSize: query.PageSize,
+			Total:    1,
+			HasMore:  false,
+			Items: []filememory.UpdateLog{
+				{
+					ID:        "memlog_1",
+					MemoryKey: "main-voice",
+					Source:    filememory.SessionSummarySource,
+					Messages: []llm.Message{
+						{Role: "assistant", Content: "你好"},
+						{Role: "user", Content: "我的名字是什么？"},
+					},
+					Before: "old",
+					After:  "new",
+				},
+			},
+		}
+	}
+	return f.page, nil
 }
 
 func (f *fakeLogs) List(query runtimelogs.ListQuery) (runtimelogs.ListPage, error) {
@@ -291,7 +361,7 @@ func TestHandleResetClearsRuntimeData(t *testing.T) {
 	}
 
 	imGateway := &fakeIM{}
-	server := New(":0", manager, claude, conversations, &fakeXiaoAI{}, runtimeSettings, imGateway, &fakeLogs{})
+	server := New(":0", manager, claude, conversations, &fakeXiaoAI{}, runtimeSettings, &fakeMemory{}, imGateway, &fakeLogs{})
 	req := httptest.NewRequest(http.MethodPost, "/api/reset", nil)
 	recorder := httptest.NewRecorder()
 
@@ -322,7 +392,7 @@ func TestHandleResetClearsRuntimeData(t *testing.T) {
 func TestHandleResetRejectsNonPost(t *testing.T) {
 	t.Parallel()
 
-	server := New(":0", nil, nil, &fakeConversations{}, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeIM{}, &fakeLogs{})
+	server := New(":0", nil, nil, &fakeConversations{}, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeMemory{}, &fakeIM{}, &fakeLogs{})
 	req := httptest.NewRequest(http.MethodGet, "/api/reset", nil)
 	recorder := httptest.NewRecorder()
 
@@ -350,7 +420,7 @@ func TestHandleStateIncludesAssistantRuntime(t *testing.T) {
 			LastRemoteAddr: "192.168.1.10:34567",
 		},
 	}
-	server := New(":0", nil, nil, conversations, xiaoai, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeIM{}, &fakeLogs{})
+	server := New(":0", nil, nil, conversations, xiaoai, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeMemory{}, &fakeIM{}, &fakeLogs{})
 	req := httptest.NewRequest(http.MethodGet, "/api/state", nil)
 	recorder := httptest.NewRecorder()
 
@@ -396,7 +466,7 @@ func TestHandleXiaoAIStatusReturnsRuntimeStatus(t *testing.T) {
 			LastDisconnectedAt: time.Unix(90, 0),
 		},
 	}
-	server := New(":0", nil, nil, &fakeConversations{}, xiaoai, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeIM{}, &fakeLogs{})
+	server := New(":0", nil, nil, &fakeConversations{}, xiaoai, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeMemory{}, &fakeIM{}, &fakeLogs{})
 	req := httptest.NewRequest(http.MethodGet, "/api/xiaoai/status", nil)
 	recorder := httptest.NewRecorder()
 
@@ -424,7 +494,7 @@ func TestHandleAssistantASRAcceptsPostedText(t *testing.T) {
 	t.Parallel()
 
 	conversations := &fakeConversations{}
-	server := New(":0", nil, nil, conversations, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeIM{}, &fakeLogs{})
+	server := New(":0", nil, nil, conversations, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeMemory{}, &fakeIM{}, &fakeLogs{})
 	req := httptest.NewRequest(http.MethodPost, "/api/assistant/asr", strings.NewReader(`{"text":"帮我总结一下今天的任务"}`))
 	recorder := httptest.NewRecorder()
 
@@ -456,7 +526,7 @@ func TestHandleAssistantASRMapsBusyToConflict(t *testing.T) {
 	t.Parallel()
 
 	conversations := &fakeConversations{submitErr: assistant.ErrVoiceChannelBusy}
-	server := New(":0", nil, nil, conversations, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeIM{}, &fakeLogs{})
+	server := New(":0", nil, nil, conversations, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeMemory{}, &fakeIM{}, &fakeLogs{})
 	req := httptest.NewRequest(http.MethodPost, "/api/assistant/asr", strings.NewReader(`{"text":"帮我继续刚刚那个任务"}`))
 	recorder := httptest.NewRecorder()
 
@@ -470,7 +540,7 @@ func TestHandleAssistantASRMapsBusyToConflict(t *testing.T) {
 func TestHandleSettingsReturnsSnapshot(t *testing.T) {
 	t.Parallel()
 
-	server := New(":0", nil, nil, nil, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeIM{}, &fakeLogs{})
+	server := New(":0", nil, nil, nil, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeMemory{}, &fakeIM{}, &fakeLogs{})
 	req := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
 	recorder := httptest.NewRecorder()
 
@@ -495,7 +565,7 @@ func TestHandleSessionSettingsUpdatesWindowSeconds(t *testing.T) {
 	t.Parallel()
 
 	runtimeSettings := &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}
-	server := New(":0", nil, nil, nil, &fakeXiaoAI{}, runtimeSettings, &fakeIM{}, &fakeLogs{})
+	server := New(":0", nil, nil, nil, &fakeXiaoAI{}, runtimeSettings, &fakeMemory{}, &fakeIM{}, &fakeLogs{})
 	req := httptest.NewRequest(http.MethodPost, "/api/settings/session", strings.NewReader(`{"window_seconds":420}`))
 	recorder := httptest.NewRecorder()
 
@@ -512,7 +582,7 @@ func TestHandleSessionSettingsUpdatesWindowSeconds(t *testing.T) {
 func TestHandleSessionSettingsRejectsInvalidValue(t *testing.T) {
 	t.Parallel()
 
-	server := New(":0", nil, nil, nil, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeIM{}, &fakeLogs{})
+	server := New(":0", nil, nil, nil, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeMemory{}, &fakeIM{}, &fakeLogs{})
 	req := httptest.NewRequest(http.MethodPost, "/api/settings/session", strings.NewReader(`{"window_seconds":1}`))
 	recorder := httptest.NewRecorder()
 
@@ -523,11 +593,109 @@ func TestHandleSessionSettingsRejectsInvalidValue(t *testing.T) {
 	}
 }
 
+func TestHandleMemorySettingsUpdatesStorageDir(t *testing.T) {
+	t.Parallel()
+
+	runtimeSettings := &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300, MemoryStorageDir: ".open-xiaoai-agent/memory"}}
+	server := New(":0", nil, nil, nil, &fakeXiaoAI{}, runtimeSettings, &fakeMemory{}, &fakeIM{}, &fakeLogs{})
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/memory", strings.NewReader(`{"memory_storage_dir":"./memory-dev"}`))
+	recorder := httptest.NewRecorder()
+
+	server.handleMemorySettings(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if runtimeSettings.snapshot.MemoryStorageDir != "./memory-dev" {
+		t.Fatalf("MemoryStorageDir = %q, want ./memory-dev", runtimeSettings.snapshot.MemoryStorageDir)
+	}
+}
+
+func TestHandleMemoryFileDefaultsToMainVoice(t *testing.T) {
+	t.Parallel()
+
+	memoryStore := &fakeMemory{}
+	server := New(":0", nil, nil, nil, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, memoryStore, &fakeIM{}, &fakeLogs{})
+	req := httptest.NewRequest(http.MethodGet, "/api/memory/file", nil)
+	recorder := httptest.NewRecorder()
+
+	server.handleMemoryFile(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if memoryStore.lastGetMemoryKey != assistant.MainVoiceHistoryKey {
+		t.Fatalf("lastGetMemoryKey = %q, want %q", memoryStore.lastGetMemoryKey, assistant.MainVoiceHistoryKey)
+	}
+}
+
+func TestHandleMemoryFileSavesContent(t *testing.T) {
+	t.Parallel()
+
+	memoryStore := &fakeMemory{}
+	server := New(":0", nil, nil, nil, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, memoryStore, &fakeIM{}, &fakeLogs{})
+	req := httptest.NewRequest(http.MethodPost, "/api/memory/file", strings.NewReader(`{"content":"# 手动维护\n\n- 常用地址：https://ha.example.com\n"}`))
+	recorder := httptest.NewRecorder()
+
+	server.handleMemoryFile(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if memoryStore.lastSaveMemoryKey != assistant.MainVoiceHistoryKey {
+		t.Fatalf("lastSaveMemoryKey = %q, want %q", memoryStore.lastSaveMemoryKey, assistant.MainVoiceHistoryKey)
+	}
+	if memoryStore.lastSaveSource != filememory.DashboardManualSource {
+		t.Fatalf("lastSaveSource = %q, want %q", memoryStore.lastSaveSource, filememory.DashboardManualSource)
+	}
+	if !strings.Contains(memoryStore.lastSaveContent, "ha.example.com") {
+		t.Fatalf("lastSaveContent = %q", memoryStore.lastSaveContent)
+	}
+}
+
+func TestHandleMemoryLogsReturnsPage(t *testing.T) {
+	t.Parallel()
+
+	memoryStore := &fakeMemory{}
+	server := New(":0", nil, nil, nil, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, memoryStore, &fakeIM{}, &fakeLogs{})
+	req := httptest.NewRequest(http.MethodGet, "/api/memory/logs?page=2&page_size=10&memory_key=main-voice", nil)
+	recorder := httptest.NewRecorder()
+
+	server.handleMemoryLogs(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if memoryStore.lastListQuery.Page != 2 || memoryStore.lastListQuery.PageSize != 10 || memoryStore.lastListQuery.MemoryKey != "main-voice" {
+		t.Fatalf("lastListQuery = %+v", memoryStore.lastListQuery)
+	}
+
+	var payload memoryLogPageResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if payload.Page != 2 || payload.PageSize != 10 {
+		t.Fatalf("payload = %+v", payload)
+	}
+	if len(payload.Items) != 1 {
+		t.Fatalf("len(payload.Items) = %d, want 1", len(payload.Items))
+	}
+	if payload.Items[0].Preview != "user：我的名字是什么？" {
+		t.Fatalf("payload.Items[0].Preview = %q", payload.Items[0].Preview)
+	}
+	if payload.Items[0].SourceLabel != "会话总结" {
+		t.Fatalf("payload.Items[0].SourceLabel = %q", payload.Items[0].SourceLabel)
+	}
+	if len(payload.Items[0].SummaryContext) != 2 {
+		t.Fatalf("len(payload.Items[0].SummaryContext) = %d, want 2", len(payload.Items[0].SummaryContext))
+	}
+}
+
 func TestHandleWeChatLoginConfirmPersistsAfterExplicitConfirmation(t *testing.T) {
 	t.Parallel()
 
 	imGateway := &fakeIM{}
-	server := New(":0", nil, nil, nil, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, imGateway, &fakeLogs{})
+	server := New(":0", nil, nil, nil, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeMemory{}, imGateway, &fakeLogs{})
 	req := httptest.NewRequest(http.MethodPost, "/api/im/wechat/login/confirm", strings.NewReader(`{"session_key":"sess-1"}`))
 	recorder := httptest.NewRecorder()
 
@@ -559,7 +727,7 @@ func TestHandleIMDebugSendDefaultUsesPostedText(t *testing.T) {
 	t.Parallel()
 
 	imGateway := &fakeIM{}
-	server := New(":0", nil, nil, nil, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, imGateway, &fakeLogs{})
+	server := New(":0", nil, nil, nil, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeMemory{}, imGateway, &fakeLogs{})
 	req := httptest.NewRequest(http.MethodPost, "/api/im/debug/send-default", strings.NewReader(`{"text":"调试消息"}`))
 	recorder := httptest.NewRecorder()
 
@@ -594,7 +762,7 @@ func TestHandleIMDebugSendImageDefaultUsesUploadedFile(t *testing.T) {
 	t.Parallel()
 
 	imGateway := &fakeIM{}
-	server := New(":0", nil, nil, nil, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, imGateway, &fakeLogs{})
+	server := New(":0", nil, nil, nil, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeMemory{}, imGateway, &fakeLogs{})
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
@@ -653,7 +821,7 @@ func TestHandleIMDebugSendFileDefaultUsesUploadedFile(t *testing.T) {
 	t.Parallel()
 
 	imGateway := &fakeIM{}
-	server := New(":0", nil, nil, nil, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, imGateway, &fakeLogs{})
+	server := New(":0", nil, nil, nil, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeMemory{}, imGateway, &fakeLogs{})
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
@@ -754,7 +922,7 @@ func TestHandleTaskArtifactDownloadServesSavedArtifact(t *testing.T) {
 		t.Fatal("artifact not found before timeout")
 	}
 
-	server := New(":0", manager, nil, nil, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeIM{}, &fakeLogs{})
+	server := New(":0", manager, nil, nil, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeMemory{}, &fakeIM{}, &fakeLogs{})
 	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/tasks/%s/artifacts/%s/download", task.ID, artifact.ID), nil)
 	recorder := httptest.NewRecorder()
 
@@ -778,7 +946,7 @@ func TestHandleLogsReturnsPaginatedEntries(t *testing.T) {
 	t.Parallel()
 
 	logStore := &fakeLogs{}
-	server := New(":0", nil, nil, nil, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeIM{}, logStore)
+	server := New(":0", nil, nil, nil, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeMemory{}, &fakeIM{}, logStore)
 	req := httptest.NewRequest(http.MethodGet, "/api/logs?page=2&page_size=25", nil)
 	recorder := httptest.NewRecorder()
 
@@ -809,7 +977,7 @@ func TestHandleLogsReturnsPaginatedEntries(t *testing.T) {
 func TestHandleLogsRejectsInvalidPage(t *testing.T) {
 	t.Parallel()
 
-	server := New(":0", nil, nil, nil, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeIM{}, &fakeLogs{})
+	server := New(":0", nil, nil, nil, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeMemory{}, &fakeIM{}, &fakeLogs{})
 	req := httptest.NewRequest(http.MethodGet, "/api/logs?page=oops", nil)
 	recorder := httptest.NewRecorder()
 

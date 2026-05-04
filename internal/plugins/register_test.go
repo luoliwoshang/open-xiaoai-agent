@@ -39,7 +39,7 @@ func TestRegisterAll_ListTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Call(list_tools) error = %v", err)
 	}
-	if result.Text != "我现在可以帮你：查股票、查天气、停任务、做任务、续任务、查进度。" {
+	if result.Text != "我现在可以帮你：查天气、停任务、做任务、继续聊、续任务、查进度。" {
 		t.Fatalf("result.Text = %q", result.Text)
 	}
 }

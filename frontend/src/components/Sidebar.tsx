@@ -1,8 +1,8 @@
-import { LayoutDashboard, FileText, Settings } from 'lucide-react'
-import type { AssistantRuntimeStatus, IMSnapshot, SettingsSnapshot, XiaoAIConnectionStatus } from '../types'
+import { BrainCircuit, LayoutDashboard, FileText, Settings } from 'lucide-react'
+import type { AssistantRuntimeStatus, IMSnapshot, Page, SettingsSnapshot, XiaoAIConnectionStatus } from '../types'
 
 interface SidebarProps {
-  page: string
+  page: Page
   assistant: AssistantRuntimeStatus
   xiaoai: XiaoAIConnectionStatus
   settings: SettingsSnapshot
@@ -74,6 +74,7 @@ function buildIMChannelStatus(settings: SettingsSnapshot, im: IMSnapshot): IMCha
 export function Sidebar({ page, assistant, xiaoai, settings, im }: SidebarProps) {
   const navItems = [
     { id: 'dashboard', label: '调试台', icon: LayoutDashboard },
+    { id: 'memory', label: '长期记忆', icon: BrainCircuit },
     { id: 'logs', label: '调试日志', icon: FileText },
     { id: 'settings', label: '调试设置', icon: Settings },
   ]

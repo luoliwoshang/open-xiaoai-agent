@@ -14,6 +14,7 @@ import (
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/im"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/llm"
 	runtimelogs "github.com/luoliwoshang/open-xiaoai-agent/internal/logs"
+	"github.com/luoliwoshang/open-xiaoai-agent/internal/memory/filememory"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugin"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugins"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugins/complextask"
@@ -59,6 +60,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	memoryService, err := filememory.New(dsn, settingsStore, filememory.NewLLMUpdater(llmClient, appConfig.Reply))
+	if err != nil {
+		log.Fatal(err)
+	}
 	imService, err := im.NewService(dsn, settingsStore, appConfig.IM.MediaCacheDir)
 	if err != nil {
 		log.Fatal(err)
@@ -96,6 +101,7 @@ func main() {
 		taskManager,
 		imService,
 		imService,
+		memoryService,
 	)
 	if err != nil {
 		log.Fatal(err)
@@ -106,7 +112,7 @@ func main() {
 		asrService.HandleUserText(assistant.MainVoiceHistoryKey, xiaoai.NewChannel(session), text)
 	})
 	go func() {
-		if err := dashboard.New(*dashboardAddr, taskManager, complexTaskService, asrService, srv, settingsStore, imService, logStore).ListenAndServe(); err != nil {
+		if err := dashboard.New(*dashboardAddr, taskManager, complexTaskService, asrService, srv, settingsStore, memoryService, imService, logStore).ListenAndServe(); err != nil {
 			log.Printf("dashboard stopped: %v", err)
 		}
 	}()

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/llm"
+	"github.com/luoliwoshang/open-xiaoai-agent/internal/memory"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugin"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/tasks"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/voice"
@@ -101,10 +102,13 @@ type Service struct {
 	tasks             TaskManager
 	mirror            MirrorSender
 	artifactDeliverer ArtifactDeliverySender
+	memory            memory.Service
 	history           *historyStore
 
 	mainHistoryKey string
 	debugChannel   voice.Channel
+
+	sessionExpiryCancel context.CancelFunc
 
 	runtimeMu         sync.Mutex
 	busy              bool
@@ -125,7 +129,7 @@ type RuntimeStatus struct {
 	HasVoiceChannel   bool `json:"has_voice_channel"`
 }
 
-func New(config Config, sessionSettings sessionWindowProvider, intent IntentDecider, reply ReplyStreamer, tools ToolRunner, taskManager TaskManager, mirror MirrorSender, artifactDeliverer ArtifactDeliverySender) (*Service, error) {
+func New(config Config, sessionSettings sessionWindowProvider, intent IntentDecider, reply ReplyStreamer, tools ToolRunner, taskManager TaskManager, mirror MirrorSender, artifactDeliverer ArtifactDeliverySender, memoryService memory.Service) (*Service, error) {
 	if config.PostAbortDelay < 0 {
 		config.PostAbortDelay = 0
 	}
@@ -133,18 +137,23 @@ func New(config Config, sessionSettings sessionWindowProvider, intent IntentDeci
 	if err != nil {
 		return nil, err
 	}
-	return &Service{
-		config:            config,
-		intent:            intent,
-		reply:             reply,
-		tools:             tools,
-		tasks:             taskManager,
-		mirror:            mirror,
-		artifactDeliverer: artifactDeliverer,
-		history:           history,
-		mainHistoryKey:    MainVoiceHistoryKey,
-		debugChannel:      debugvoice.NewChannel("dashboard"),
-	}, nil
+	expiryCtx, expiryCancel := context.WithCancel(context.Background())
+	service := &Service{
+		config:              config,
+		intent:              intent,
+		reply:               reply,
+		tools:               tools,
+		tasks:               taskManager,
+		mirror:              mirror,
+		artifactDeliverer:   artifactDeliverer,
+		memory:              memoryService,
+		history:             history,
+		mainHistoryKey:      MainVoiceHistoryKey,
+		debugChannel:        debugvoice.NewChannel("dashboard"),
+		sessionExpiryCancel: expiryCancel,
+	}
+	go service.runSessionExpiryLoop(expiryCtx)
+	return service, nil
 }
 
 func (s *Service) SnapshotConversations() []ConversationSnapshot {
@@ -159,6 +168,13 @@ func (s *Service) ResetConversationData() error {
 		return nil
 	}
 	return s.history.Reset()
+}
+
+func (s *Service) Close() {
+	if s == nil || s.sessionExpiryCancel == nil {
+		return
+	}
+	s.sessionExpiryCancel()
 }
 
 // RuntimeStatus 返回当前 assistant 主语音通道的运行时快照。
@@ -261,6 +277,8 @@ func (s *Service) handleUserText(historyKey string, channel voice.Channel, text 
 
 	now := time.Now()
 	history := s.history.Snapshot(historyRef(historyKey), now)
+	memoryText := s.recallMemory(historyKey)
+	replyHistory := withMemoryMessage(history, memoryText)
 	metrics := newTurnMetrics(now, text, len(history))
 
 	log.Printf("user text: %s", text)
@@ -289,7 +307,7 @@ func (s *Service) handleUserText(historyKey string, channel voice.Channel, text 
 		speculativeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		speculativeCancel = cancel
 		defer speculativeCancel()
-		speculative = startSpeculativeReply(speculativeCtx, s.reply, history, text)
+		speculative = startSpeculativeReply(speculativeCtx, s.reply, replyHistory, text)
 		log.Printf("speculative reply started")
 	}
 
@@ -332,7 +350,7 @@ func (s *Service) handleUserText(historyKey string, channel voice.Channel, text 
 			if speculative != nil {
 				speculative.Cancel()
 			}
-			shouldDeliverResultReports = s.handleToolCall(historyKey, channel, history, now, text, *decision.ToolCall, interrupted, decision.ShouldAbort, metrics)
+			shouldDeliverResultReports = s.handleToolCall(historyKey, channel, history, replyHistory, memoryText, now, text, *decision.ToolCall, interrupted, decision.ShouldAbort, metrics)
 			return
 		}
 	}
@@ -368,7 +386,7 @@ func (s *Service) handleUserText(historyKey string, channel voice.Channel, text 
 	} else {
 		ctx, cancel = context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
-		if err := s.reply.Stream(ctx, history, text, func(delta string) error {
+		if err := s.reply.Stream(ctx, replyHistory, text, func(delta string) error {
 			metrics.MarkOutputStart("reply")
 			replyText.WriteString(delta)
 			return player.Push(delta)
@@ -381,9 +399,9 @@ func (s *Service) handleUserText(historyKey string, channel voice.Channel, text 
 		log.Printf("reply flush failed: %v", err)
 		return
 	}
-
-	s.history.AppendTurn(historyRef(historyKey), now, text, strings.TrimSpace(replyText.String()))
-	s.mirrorReply(replyText.String())
+	finalReply := strings.TrimSpace(replyText.String())
+	s.appendConversationTurn(historyKey, now, "assistant_reply", llm.Message{Role: "user", Content: text}, llm.Message{Role: "assistant", Content: finalReply})
+	s.mirrorReply(finalReply)
 	shouldDeliverResultReports = true
 	metrics.LogCompleted("reply playback")
 }
@@ -404,7 +422,7 @@ func (s *Service) handleUserText(historyKey string, channel voice.Channel, text 
 //     工具返回的文本可以直接播，不需要再过 reply 模型包装；
 //  3. 默认模式
 //     先拿到工具原始结果，再交给 reply 模型整理成更适合语音播报的话术后播放。
-func (s *Service) handleToolCall(historyKey string, channel voice.Channel, history []llm.Message, turnStartedAt time.Time, userText string, call llm.ToolCall, interrupted bool, shouldAbort bool, metrics *turnMetrics) bool {
+func (s *Service) handleToolCall(historyKey string, channel voice.Channel, history []llm.Message, replyHistory []llm.Message, memoryText string, turnStartedAt time.Time, userText string, call llm.ToolCall, interrupted bool, shouldAbort bool, metrics *turnMetrics) bool {
 	if s.tools == nil {
 		log.Printf("tool runner not configured: %s", call.Name)
 		return false
@@ -425,7 +443,8 @@ func (s *Service) handleToolCall(historyKey string, channel voice.Channel, histo
 	}
 	log.Printf("tool invoke: tool=%s arguments=%s", call.Name, argsText)
 
-	result, err := s.tools.Call(ctx, call.Name, call.Arguments)
+	toolCtx := plugin.WithMemoryContext(ctx, historyKey, memoryText)
+	result, err := s.tools.Call(toolCtx, call.Name, call.Arguments)
 	if err != nil {
 		log.Printf("tool call failed: tool=%s err=%v", call.Name, err)
 		return false
@@ -454,8 +473,9 @@ func (s *Service) handleToolCall(historyKey string, channel voice.Channel, histo
 			return false
 		}
 
-		s.history.AppendTurn(historyRef(historyKey), turnStartedAt, userText, strings.TrimSpace(result.Text))
-		s.mirrorReply(result.Text)
+		finalReply := strings.TrimSpace(result.Text)
+		s.appendConversationTurn(historyKey, turnStartedAt, "tool_direct", llm.Message{Role: "user", Content: userText}, llm.Message{Role: "assistant", Content: finalReply})
+		s.mirrorReply(finalReply)
 		metrics.LogCompleted("tool reply playback")
 		log.Printf("tool reply playback completed: tool=%s", call.Name)
 		return true
@@ -469,7 +489,7 @@ func (s *Service) handleToolCall(historyKey string, channel voice.Channel, histo
 	// 然后走流式播放器一边生成一边播报。
 	player := voice.NewStreamSpeaker(channel, 30*time.Second, 100*time.Millisecond)
 	var replyText strings.Builder
-	if err := s.reply.StreamToolResult(ctx, history, userText, call.Name, result.Text, func(delta string) error {
+	if err := s.reply.StreamToolResult(ctx, replyHistory, userText, call.Name, result.Text, func(delta string) error {
 		metrics.MarkOutputStart("tool_reply")
 		replyText.WriteString(delta)
 		return player.Push(delta)
@@ -488,7 +508,7 @@ func (s *Service) handleToolCall(historyKey string, channel voice.Channel, histo
 		return false
 	}
 
-	s.history.AppendTurn(historyRef(historyKey), turnStartedAt, userText, finalReply)
+	s.appendConversationTurn(historyKey, turnStartedAt, "tool_reply", llm.Message{Role: "user", Content: userText}, llm.Message{Role: "assistant", Content: finalReply})
 	s.mirrorReply(finalReply)
 	metrics.LogCompleted("tool reply playback")
 	log.Printf("tool reply playback completed: tool=%s", call.Name)
@@ -540,7 +560,7 @@ func (s *Service) handleAsyncTask(historyKey string, channel voice.Channel, turn
 		log.Printf("async accept playback failed: tool=%s err=%v", call.Name, err)
 		return false
 	}
-	s.history.AppendTurn(historyRef(historyKey), turnStartedAt, userText, replyText)
+	s.appendConversationTurn(historyKey, turnStartedAt, "async_accept", llm.Message{Role: "user", Content: userText}, llm.Message{Role: "assistant", Content: replyText})
 	s.mirrorReply(replyText)
 	metrics.LogCompleted("async task accept")
 	return true
@@ -699,13 +719,14 @@ func (s *Service) deliverTaskResultReports(historyKey string, channel voice.Chan
 	deliveries := s.syncTaskArtifactDeliveriesBeforeReport(ids)
 	reportContext := buildTaskResultReportContext(items, deliveries)
 	history := s.history.Snapshot(historyRef(historyKey), time.Now())
+	replyHistory := withMemoryMessage(history, s.recallMemory(historyKey))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
 	player := voice.NewStreamSpeaker(channel, 30*time.Second, 100*time.Millisecond)
 	var replyText strings.Builder
-	if err := s.reply.StreamTaskResultReport(ctx, history, reportContext, func(delta string) error {
+	if err := s.reply.StreamTaskResultReport(ctx, replyHistory, reportContext, func(delta string) error {
 		replyText.WriteString(delta)
 		return player.Push(delta)
 	}); err != nil {
@@ -723,7 +744,7 @@ func (s *Service) deliverTaskResultReports(historyKey string, channel voice.Chan
 		return
 	}
 
-	s.history.AppendTurn(historyRef(historyKey), time.Now(), "", finalReply)
+	s.appendConversationTurn(historyKey, time.Now(), "task_result_report", llm.Message{Role: "assistant", Content: finalReply})
 	s.mirrorReply(finalReply)
 	if err := s.tasks.MarkResultReported(ids); err != nil {
 		log.Printf("mark task result report failed: %v", err)
