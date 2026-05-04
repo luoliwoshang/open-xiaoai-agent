@@ -135,6 +135,7 @@ func TestBuildClaudePrompt(t *testing.T) {
 		".open-xiaoai-agent/deliverables/task_1",
 		".open-xiaoai-agent/artifacts/task_1.json",
 		"这个 JSON 文件只负责声明交付产物位置和元数据",
+		"name 必须优先带上和真实文件一致的后缀",
 		"不要直接说“保存为 xxx.png / xxx.html / xxx.txt”",
 		"不要提工作目录、相对路径、绝对路径、manifest、终端命令",
 		"普通人能直接听懂",
@@ -155,6 +156,7 @@ func TestBuildClaudeResumePrompt(t *testing.T) {
 		"把这次输入视为对上一个任务的补充、修改或追加要求",
 		".open-xiaoai-agent/deliverables/task_2",
 		".open-xiaoai-agent/artifacts/task_2.json",
+		"name 必须优先带上和真实文件一致的后缀",
 		"不要直接说“保存为 xxx.png / xxx.html / xxx.txt”",
 		"不要提工作目录、相对路径、绝对路径、manifest、终端命令",
 		"普通人能直接听懂",
@@ -238,6 +240,55 @@ func TestImportArtifactsFromManifest(t *testing.T) {
 	}
 	if len(reporter.events) == 0 || reporter.events[len(reporter.events)-1] != "claude_artifacts:Claude 已登记 2 个交付产物" {
 		t.Fatalf("events = %#v", reporter.events)
+	}
+}
+
+func TestImportArtifactsAppendsFileExtensionWhenManifestNameOmitsIt(t *testing.T) {
+	t.Parallel()
+
+	cwd := t.TempDir()
+	outputDir := filepath.Join(cwd, ".open-xiaoai-agent", "deliverables", "task_1")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	filePath := filepath.Join(outputDir, "breathing-exercise.html")
+	if err := os.WriteFile(filePath, []byte("<html>breathing</html>"), 0o644); err != nil {
+		t.Fatalf("WriteFile(file) error = %v", err)
+	}
+
+	manifestDir := filepath.Join(cwd, ".open-xiaoai-agent", "artifacts")
+	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(manifest) error = %v", err)
+	}
+	manifestPath := filepath.Join(manifestDir, "task_1.json")
+	raw, err := json.Marshal(artifactManifest{
+		Deliver: []artifactManifestEntry{
+			{
+				Path:     ".open-xiaoai-agent/deliverables/task_1/breathing-exercise.html",
+				Name:     "呼吸练习",
+				Kind:     "file",
+				MIMEType: "text/html",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if err := os.WriteFile(manifestPath, raw, 0o644); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	reporter := &fakeReporter{taskID: "task_1"}
+	runner := NewClaudeRunner(nil, cwd)
+	if err := runner.importArtifacts("task_1", reporter); err != nil {
+		t.Fatalf("importArtifacts() error = %v", err)
+	}
+
+	if len(reporter.artifacts) != 1 {
+		t.Fatalf("len(artifacts) = %d, want 1", len(reporter.artifacts))
+	}
+	if reporter.artifacts[0].FileName != "呼吸练习.html" {
+		t.Fatalf("artifacts[0].FileName = %q, want %q", reporter.artifacts[0].FileName, "呼吸练习.html")
 	}
 }
 

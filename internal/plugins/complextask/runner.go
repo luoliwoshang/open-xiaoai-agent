@@ -252,11 +252,12 @@ func buildClaudePrompt(taskID string, task string) string {
 8. 这个 JSON 文件只负责声明交付产物位置和元数据，不要把文件内容写进 JSON。
 9. JSON 结构固定为 {"deliver":[{"path":"相对工作目录的文件路径","name":"展示文件名","kind":"file","mime_type":"可选 MIME 类型"}]}。
 10. manifest 里的 path 必须指向这次任务真实生成的文件，并且只能引用上面那个任务专属目录里的文件。
-11. 如果没有需要交付的文件，就不要创建这个 JSON 索引文件。
-12. 最终总结优先说明两件事：你完成了什么、用户接下来可以怎么用；尽量控制在 2 到 4 句，不要长篇展开。
-13. 真实用户并不坐在你所在的电脑前，所以面向用户的进度汇报和最终总结里，不要提工作目录、相对路径、绝对路径、manifest、终端命令、文件保存位置或内部工程细节。
-14. 如果已经产出了文件，也不要直接说“保存为 xxx.png / xxx.html / xxx.txt”；只需要说明你已经把结果准备好了，系统会按产物交付流程处理。
-15. 面向用户的表达默认按普通人能直接听懂的方式来写，避免过于专业、冗余或工程化的描述。`,
+11. 如果你在 manifest 里填写 name，name 必须优先带上和真实文件一致的后缀；如果你不确定展示文件名，就直接省略 name，让系统回退到 path 对应的文件名。
+12. 如果没有需要交付的文件，就不要创建这个 JSON 索引文件。
+13. 最终总结优先说明两件事：你完成了什么、用户接下来可以怎么用；尽量控制在 2 到 4 句，不要长篇展开。
+14. 真实用户并不坐在你所在的电脑前，所以面向用户的进度汇报和最终总结里，不要提工作目录、相对路径、绝对路径、manifest、终端命令、文件保存位置或内部工程细节。
+15. 如果已经产出了文件，也不要直接说“保存为 xxx.png / xxx.html / xxx.txt”；只需要说明你已经把结果准备好了，系统会按产物交付流程处理。
+16. 面向用户的表达默认按普通人能直接听懂的方式来写，避免过于专业、冗余或工程化的描述。`,
 		task,
 		artifactDir,
 		manifestPath,
@@ -282,11 +283,12 @@ func buildClaudeResumePrompt(taskID string, task string) string {
 9. 这个 JSON 文件只负责声明交付产物位置和元数据，不要把文件内容写进 JSON。
 10. JSON 结构固定为 {"deliver":[{"path":"相对工作目录的文件路径","name":"展示文件名","kind":"file","mime_type":"可选 MIME 类型"}]}。
 11. manifest 里的 path 必须指向这次续做真实生成或更新过的文件，并且只能引用上面那个任务专属目录里的文件。
-12. 如果这次续做没有新的交付文件，就不要创建这个 JSON 索引文件。
-13. 最终总结优先说明两件事：这次补充后你完成了什么、用户接下来可以怎么用；尽量控制在 2 到 4 句，不要长篇展开。
-14. 真实用户并不坐在你所在的电脑前，所以面向用户的进度汇报和最终总结里，不要提工作目录、相对路径、绝对路径、manifest、终端命令、文件保存位置或其他内部工程细节。
-15. 如果已经产出了文件，也不要直接说“保存为 xxx.png / xxx.html / xxx.txt”；只需要说明你已经把结果准备好了，系统会按产物交付流程处理。
-16. 面向用户的表达默认按普通人能直接听懂的方式来写，避免过于专业、冗余或工程化的描述。`,
+12. 如果你在 manifest 里填写 name，name 必须优先带上和真实文件一致的后缀；如果你不确定展示文件名，就直接省略 name，让系统回退到 path 对应的文件名。
+13. 如果这次续做没有新的交付文件，就不要创建这个 JSON 索引文件。
+14. 最终总结优先说明两件事：这次补充后你完成了什么、用户接下来可以怎么用；尽量控制在 2 到 4 句，不要长篇展开。
+15. 真实用户并不坐在你所在的电脑前，所以面向用户的进度汇报和最终总结里，不要提工作目录、相对路径、绝对路径、manifest、终端命令、文件保存位置或其他内部工程细节。
+16. 如果已经产出了文件，也不要直接说“保存为 xxx.png / xxx.html / xxx.txt”；只需要说明你已经把结果准备好了，系统会按产物交付流程处理。
+17. 面向用户的表达默认按普通人能直接听懂的方式来写，避免过于专业、冗余或工程化的描述。`,
 		task,
 		artifactDir,
 		manifestPath,
@@ -337,6 +339,12 @@ func (r *ClaudeRunner) loadArtifactManifest(taskID string) (artifactManifest, bo
 	return manifest, true, nil
 }
 
+// buildArtifactRequest 把 manifest 条目转换成任务系统可消费的产物导入请求。
+//
+// 这里会同时完成三件事：
+// 1. 根据 Claude 工作目录和 task 专属产物目录解析、校验真实文件路径。
+// 2. 打开真实文件，把内容流交给任务系统导入。
+// 3. 规范化展示文件名，避免 manifest.name 漏掉后缀后继续原样流入下载链路。
 func (r *ClaudeRunner) buildArtifactRequest(taskID string, item artifactManifestEntry) (plugin.PutArtifactRequest, error) {
 	resolvedPath, err := resolveArtifactPath(r.cwd, taskID, item.Path)
 	if err != nil {
@@ -357,6 +365,8 @@ func (r *ClaudeRunner) buildArtifactRequest(taskID string, item artifactManifest
 	name := strings.TrimSpace(item.Name)
 	if name == "" {
 		name = filepath.Base(resolvedPath)
+	} else {
+		name = ensureArtifactNameHasResolvedExt(name, resolvedPath)
 	}
 	kind := strings.TrimSpace(item.Kind)
 	if kind == "" {
@@ -370,6 +380,28 @@ func (r *ClaudeRunner) buildArtifactRequest(taskID string, item artifactManifest
 		Reader:   file,
 		Size:     stat.Size(),
 	}, nil
+}
+
+// ensureArtifactNameHasResolvedExt 只处理一种兜底场景：
+// manifest 明确给了 name，但这个展示文件名没有后缀。
+//
+// 此时优先复用真实文件路径上的后缀补齐 name，这样 Dashboard 展示名、
+// 下载文件名和移动端打开行为就不会因为缺少后缀而出问题。
+//
+// 如果 name 本身已经带后缀，或者真实文件路径上也没有可靠后缀，则保持原值。
+func ensureArtifactNameHasResolvedExt(name string, resolvedPath string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return name
+	}
+	if filepath.Ext(name) != "" {
+		return name
+	}
+	resolvedExt := strings.TrimSpace(filepath.Ext(filepath.Base(strings.TrimSpace(resolvedPath))))
+	if resolvedExt == "" {
+		return name
+	}
+	return name + resolvedExt
 }
 
 func artifactManifestRelativePath(taskID string) string {
