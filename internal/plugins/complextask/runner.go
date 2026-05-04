@@ -339,6 +339,12 @@ func (r *ClaudeRunner) loadArtifactManifest(taskID string) (artifactManifest, bo
 	return manifest, true, nil
 }
 
+// buildArtifactRequest 把 manifest 条目转换成任务系统可消费的产物导入请求。
+//
+// 这里会同时完成三件事：
+// 1. 根据 Claude 工作目录和 task 专属产物目录解析、校验真实文件路径。
+// 2. 打开真实文件，把内容流交给任务系统导入。
+// 3. 规范化展示文件名，避免 manifest.name 漏掉后缀后继续原样流入下载链路。
 func (r *ClaudeRunner) buildArtifactRequest(taskID string, item artifactManifestEntry) (plugin.PutArtifactRequest, error) {
 	resolvedPath, err := resolveArtifactPath(r.cwd, taskID, item.Path)
 	if err != nil {
@@ -376,6 +382,13 @@ func (r *ClaudeRunner) buildArtifactRequest(taskID string, item artifactManifest
 	}, nil
 }
 
+// ensureArtifactNameHasResolvedExt 只处理一种兜底场景：
+// manifest 明确给了 name，但这个展示文件名没有后缀。
+//
+// 此时优先复用真实文件路径上的后缀补齐 name，这样 Dashboard 展示名、
+// 下载文件名和移动端打开行为就不会因为缺少后缀而出问题。
+//
+// 如果 name 本身已经带后缀，或者真实文件路径上也没有可靠后缀，则保持原值。
 func ensureArtifactNameHasResolvedExt(name string, resolvedPath string) string {
 	name = strings.TrimSpace(name)
 	if name == "" {
