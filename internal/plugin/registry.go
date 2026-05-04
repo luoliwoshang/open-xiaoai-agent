@@ -134,6 +134,13 @@ func (r *Registry) Register(tool Tool) error {
 	return nil
 }
 
+// Definitions 返回当前 registry 里所有已注册工具的“LLM 可见定义”。
+//
+// 这里会把完整的 Tool（包含 Go 侧 handler）裁剪成 llm.ToolDefinition，
+// 只保留 name / description / input schema 这类元数据。
+// 这些定义会被 IntentRecognizer 传给 intent 模型，用来做工具路由和 tool call 判定。
+//
+// 因此它返回的不是“函数实现列表”，而是“给模型看的工具说明列表”。
 func (r *Registry) Definitions() []llm.ToolDefinition {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

@@ -17,6 +17,7 @@ import (
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/assistant"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/im"
 	runtimelogs "github.com/luoliwoshang/open-xiaoai-agent/internal/logs"
+	"github.com/luoliwoshang/open-xiaoai-agent/internal/memory/filememory"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugins/complextask"
 	agentserver "github.com/luoliwoshang/open-xiaoai-agent/internal/server"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/settings"
@@ -39,6 +40,12 @@ type Server struct {
 	settings interface {
 		Snapshot() settings.Snapshot
 		UpdateSessionWindowSeconds(seconds int) (settings.Snapshot, error)
+		UpdateMemoryStorageDir(dir string) (settings.Snapshot, error)
+	}
+	memory interface {
+		GetFile(memoryKey string) (filememory.ManagedFile, error)
+		SaveFile(memoryKey string, content string, source string) (filememory.ManagedFile, error)
+		ListLogs(query filememory.ListQuery) (filememory.ListPage, error)
 	}
 	im interface {
 		Snapshot() im.Snapshot
@@ -70,6 +77,11 @@ func New(addr string, tasks *tasks.Manager, claude *complextask.Service, convers
 }, runtimeSettings interface {
 	Snapshot() settings.Snapshot
 	UpdateSessionWindowSeconds(seconds int) (settings.Snapshot, error)
+	UpdateMemoryStorageDir(dir string) (settings.Snapshot, error)
+}, memoryManager interface {
+	GetFile(memoryKey string) (filememory.ManagedFile, error)
+	SaveFile(memoryKey string, content string, source string) (filememory.ManagedFile, error)
+	ListLogs(query filememory.ListQuery) (filememory.ListPage, error)
 }, imGateway interface {
 	Snapshot() im.Snapshot
 	StartWeChatLogin() (im.WeChatLoginStart, error)
@@ -94,6 +106,7 @@ func New(addr string, tasks *tasks.Manager, claude *complextask.Service, convers
 		conversations: conversations,
 		xiaoai:        xiaoaiStatus,
 		settings:      runtimeSettings,
+		memory:        memoryManager,
 		im:            imGateway,
 		logs:          logStore,
 	}
@@ -109,6 +122,9 @@ func (s *Server) ListenAndServe() error {
 	mux.HandleFunc("/api/logs", s.handleLogs)
 	mux.HandleFunc("/api/settings", s.handleSettings)
 	mux.HandleFunc("/api/settings/session", s.handleSessionSettings)
+	mux.HandleFunc("/api/settings/memory", s.handleMemorySettings)
+	mux.HandleFunc("/api/memory/file", s.handleMemoryFile)
+	mux.HandleFunc("/api/memory/logs", s.handleMemoryLogs)
 	mux.HandleFunc("/api/settings/im-delivery", s.handleIMDeliverySettings)
 	mux.HandleFunc("/api/im/wechat/login/start", s.handleWeChatLoginStart)
 	mux.HandleFunc("/api/im/wechat/login/status", s.handleWeChatLoginStatus)
@@ -374,6 +390,132 @@ func (s *Server) handleSessionSettings(w http.ResponseWriter, r *http.Request) {
 		"ok":      true,
 		"session": snapshot,
 	})
+}
+
+func (s *Server) handleMemorySettings(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.settings == nil {
+		http.Error(w, "settings are not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	var payload struct {
+		StorageDir string `json:"memory_storage_dir"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, fmt.Sprintf("decode memory settings: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	snapshot, err := s.settings.UpdateMemoryStorageDir(payload.StorageDir)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	writeJSON(w, map[string]any{
+		"ok":       true,
+		"settings": snapshot,
+	})
+}
+
+func (s *Server) handleMemoryFile(w http.ResponseWriter, r *http.Request) {
+	if s.memory == nil {
+		http.Error(w, "memory service is not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		memoryKey := strings.TrimSpace(r.URL.Query().Get("memory_key"))
+		if memoryKey == "" {
+			memoryKey = assistant.MainVoiceHistoryKey
+		}
+		file, err := s.memory.GetFile(memoryKey)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, map[string]any{
+			"ok":   true,
+			"file": file,
+		})
+	case http.MethodPost:
+		var payload struct {
+			MemoryKey string `json:"memory_key"`
+			Content   string `json:"content"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, fmt.Sprintf("decode memory file payload: %v", err), http.StatusBadRequest)
+			return
+		}
+		memoryKey := strings.TrimSpace(payload.MemoryKey)
+		if memoryKey == "" {
+			memoryKey = assistant.MainVoiceHistoryKey
+		}
+		file, err := s.memory.SaveFile(memoryKey, payload.Content, filememory.DashboardManualSource)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, map[string]any{
+			"ok":   true,
+			"file": file,
+		})
+	default:
+		w.Header().Set("Allow", http.MethodGet+", "+http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleMemoryLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.memory == nil {
+		http.Error(w, "memory service is not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	page := 1
+	if raw := r.URL.Query().Get("page"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("invalid page: %v", err), http.StatusBadRequest)
+			return
+		}
+		page = value
+	}
+	pageSize := filememory.DefaultPageSize
+	if raw := r.URL.Query().Get("page_size"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("invalid page_size: %v", err), http.StatusBadRequest)
+			return
+		}
+		pageSize = value
+	}
+	query, err := filememory.NormalizeQuery(filememory.ListQuery{
+		Page:      page,
+		PageSize:  pageSize,
+		MemoryKey: strings.TrimSpace(r.URL.Query().Get("memory_key")),
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	result, err := s.memory.ListLogs(query)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, result)
 }
 
 func (s *Server) handleIMDeliverySettings(w http.ResponseWriter, r *http.Request) {

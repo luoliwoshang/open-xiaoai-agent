@@ -17,6 +17,8 @@ const (
 	IMDeliveryEnabledSettingKey    = "im.delivery.enabled"
 	IMSelectedAccountSettingKey    = "im.delivery.selected_account_id"
 	IMSelectedTargetSettingKey     = "im.delivery.selected_target_id"
+	MemoryStorageDirSettingKey     = "memory.storage_dir"
+	DefaultMemoryStorageDir        = ".open-xiaoai-agent/memory"
 )
 
 func OpenRuntimeDB(dsn string) (*sql.DB, error) {
@@ -206,6 +208,17 @@ func ensureSchema(db *sql.DB) error {
 			created_at BIGINT NOT NULL,
 			INDEX idx_runtime_logs_created_at (created_at)
 		)`,
+		`CREATE TABLE IF NOT EXISTS memory_update_logs (
+			id VARCHAR(255) PRIMARY KEY,
+			memory_key VARCHAR(255) NOT NULL,
+			source VARCHAR(64) NOT NULL,
+			messages_json LONGTEXT NOT NULL,
+			before_text LONGTEXT NOT NULL,
+			after_text LONGTEXT NOT NULL,
+			created_at BIGINT NOT NULL,
+			INDEX idx_memory_update_logs_created_at (created_at),
+			INDEX idx_memory_update_logs_memory_key (memory_key)
+		)`,
 	}
 
 	for _, statement := range statements {
@@ -254,6 +267,7 @@ func ensureDefaultSettings(db *sql.DB) error {
 		IMDeliveryEnabledSettingKey:    "0",
 		IMSelectedAccountSettingKey:    "",
 		IMSelectedTargetSettingKey:     "",
+		MemoryStorageDirSettingKey:     DefaultMemoryStorageDir,
 	}
 
 	for key, value := range defaults {

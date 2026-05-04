@@ -78,8 +78,9 @@ func Register(registry *plugin.Registry, service *Service) error {
 			}
 
 			title := summarizeTitle(args.Request)
+			memoryCtx, hasMemory := plugin.MemoryFromContext(ctx)
 			return plugin.Result{
-				Text:       "收到，这个任务我先去处理，Claude 在后台开始干活了。",
+				Text:       "收到！这个任务我让我的同事去干了！你现在可以继续和我对话哦！",
 				OutputMode: plugin.OutputModeAsyncAccept,
 				AsyncTask: &plugin.AsyncTask{
 					Plugin: "complex_task",
@@ -87,6 +88,9 @@ func Register(registry *plugin.Registry, service *Service) error {
 					Title:  title,
 					Input:  args.Request,
 					Run: func(ctx context.Context, reporter plugin.AsyncReporter) (string, error) {
+						if hasMemory {
+							ctx = plugin.WithMemoryContext(ctx, memoryCtx.Key, memoryCtx.Text)
+						}
 						return service.runner.Run(ctx, args.Request, reporter)
 					},
 				},

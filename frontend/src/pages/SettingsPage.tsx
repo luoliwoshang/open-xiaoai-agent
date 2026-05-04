@@ -3,6 +3,7 @@ import { Cog, MessageSquare } from 'lucide-react'
 import type { DashboardState, WeChatLoginStart, WeChatLoginStatus } from '../types'
 import {
   saveSessionSettings,
+  saveMemorySettings,
   saveIMDeliverySettings,
   startWeChatLogin,
   getWeChatLoginStatus,
@@ -17,6 +18,7 @@ import {
 } from '../lib/api'
 import { selectBestTarget } from '../lib/dashboard'
 import { SessionSettingsPanel } from '../components/settings/SessionSettingsPanel'
+import { MemorySettingsPanel } from '../components/settings/MemorySettingsPanel'
 import { IMDeliveryPanel } from '../components/settings/IMDeliveryPanel'
 import { IMDebugSendPanel } from '../components/settings/IMDebugSendPanel'
 import { IMTargetsPanel } from '../components/settings/IMTargetsPanel'
@@ -49,6 +51,12 @@ export function SettingsPage({ state, onReload }: SettingsPageProps) {
   const handleSaveSession = async (seconds: number) => {
     await saveSessionSettings({ session_window_seconds: seconds })
     showToast('会话设置已保存')
+    onReload()
+  }
+
+  const handleSaveMemoryDir = async (dir: string) => {
+    await saveMemorySettings(dir)
+    showToast('记忆目录已保存')
     onReload()
   }
 
@@ -128,10 +136,16 @@ export function SettingsPage({ state, onReload }: SettingsPageProps) {
 
         <div className="settings-content">
           {section === 'system' && (
-            <SessionSettingsPanel
-              windowSeconds={state.settings.session_window_seconds}
-              onSave={handleSaveSession}
-            />
+            <>
+              <SessionSettingsPanel
+                windowSeconds={state.settings.session_window_seconds}
+                onSave={handleSaveSession}
+              />
+              <MemorySettingsPanel
+                storageDir={state.settings.memory_storage_dir}
+                onSave={handleSaveMemoryDir}
+              />
+            </>
           )}
 
           {section === 'im' && (

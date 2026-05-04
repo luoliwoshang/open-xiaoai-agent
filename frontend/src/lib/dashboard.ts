@@ -27,6 +27,7 @@ export const emptyState: DashboardState = {
     im_delivery_enabled: false,
     im_selected_account_id: '',
     im_selected_target_id: '',
+    memory_storage_dir: '.open-xiaoai-agent/memory',
   },
   im: { accounts: [], targets: [], events: [] },
 }
@@ -68,16 +69,42 @@ export function currentPageFromHash(): string {
 
 export function normalizeState(raw: Partial<DashboardState> | null | undefined): DashboardState {
   if (!raw) return { ...emptyState }
+
+  const assistant = raw.assistant ?? emptyState.assistant
+  const xiaoai = raw.xiaoai ?? emptyState.xiaoai
+  const settings = raw.settings ?? emptyState.settings
+  const im = raw.im ?? emptyState.im
+
   return {
-    tasks: raw.tasks ?? [],
-    events: raw.events ?? [],
-    artifacts: raw.artifacts ?? [],
-    claude_records: raw.claude_records ?? [],
-    conversations: raw.conversations ?? [],
-    assistant: raw.assistant ?? { busy: false, result_report_ready: false, has_voice_channel: false },
-    xiaoai: raw.xiaoai ?? emptyState.xiaoai,
-    settings: raw.settings ?? emptyState.settings,
-    im: raw.im ?? emptyState.im,
+    tasks: Array.isArray(raw.tasks) ? raw.tasks : [],
+    events: Array.isArray(raw.events) ? raw.events : [],
+    artifacts: Array.isArray(raw.artifacts) ? raw.artifacts : [],
+    claude_records: Array.isArray(raw.claude_records) ? raw.claude_records : [],
+    conversations: Array.isArray(raw.conversations) ? raw.conversations : [],
+    assistant: {
+      busy: assistant?.busy ?? false,
+      result_report_ready: assistant?.result_report_ready ?? false,
+      has_voice_channel: assistant?.has_voice_channel ?? false,
+    },
+    xiaoai: {
+      connected: xiaoai?.connected ?? false,
+      active_sessions: xiaoai?.active_sessions ?? 0,
+      last_connected_at: xiaoai?.last_connected_at ?? '',
+      last_disconnected_at: xiaoai?.last_disconnected_at ?? '',
+      last_remote_addr: xiaoai?.last_remote_addr ?? '',
+    },
+    settings: {
+      session_window_seconds: settings?.session_window_seconds ?? 300,
+      im_delivery_enabled: settings?.im_delivery_enabled ?? false,
+      im_selected_account_id: settings?.im_selected_account_id ?? '',
+      im_selected_target_id: settings?.im_selected_target_id ?? '',
+      memory_storage_dir: settings?.memory_storage_dir ?? '.open-xiaoai-agent/memory',
+    },
+    im: {
+      accounts: Array.isArray(im?.accounts) ? im.accounts : [],
+      targets: Array.isArray(im?.targets) ? im.targets : [],
+      events: Array.isArray(im?.events) ? im.events : [],
+    },
   }
 }
 

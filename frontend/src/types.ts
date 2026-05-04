@@ -78,6 +78,7 @@ export interface SettingsSnapshot {
   im_delivery_enabled: boolean
   im_selected_account_id: string
   im_selected_target_id: string
+  memory_storage_dir: string
 }
 
 export interface SessionSettings {
@@ -158,6 +159,31 @@ export interface LogPage {
   has_more: boolean
 }
 
+export interface MemoryManagedFile {
+  memory_key: string
+  path: string
+  content: string
+  updated_at: string
+}
+
+export interface MemoryUpdateLog {
+  id: string
+  memory_key: string
+  source: string
+  messages: ConversationMessage[] | null
+  before: string
+  after: string
+  created_at: string
+}
+
+export interface MemoryUpdateLogPage {
+  items: MemoryUpdateLog[]
+  page: number
+  page_size: number
+  total: number
+  has_more: boolean
+}
+
 export interface DashboardState {
   tasks: Task[]
   events: TaskEvent[]
@@ -170,4 +196,4 @@ export interface DashboardState {
   im: IMSnapshot
 }
 
-export type Page = 'dashboard' | 'settings' | 'logs'
+export type Page = 'dashboard' | 'settings' | 'logs' | 'memory'

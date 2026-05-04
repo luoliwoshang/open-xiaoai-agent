@@ -4,6 +4,7 @@ import (
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugin"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugins/canceltask"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugins/complextask"
+	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugins/continuechat"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugins/continuetask"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugins/listtools"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugins/querytaskprogress"
@@ -17,6 +18,9 @@ func RegisterAll(registry *plugin.Registry, weatherService weather.Service, task
 		return err
 	}
 	if err := stock.Register(registry); err != nil {
+		return err
+	}
+	if err := continuechat.Register(registry); err != nil {
 		return err
 	}
 	if err := complextask.Register(registry, complexTaskService); err != nil {

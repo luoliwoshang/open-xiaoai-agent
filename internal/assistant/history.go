@@ -40,6 +40,12 @@ type historyStore struct {
 	settings sessionWindowProvider
 	db       *sql.DB
 	entries  map[string]*conversationHistory
+	// closed 暂存已经自然结束、等待被长期记忆系统消费的整段 session 快照。
+	//
+	// 之所以单独排队，而不是在过期时直接丢掉，是为了保证：
+	// 1. session 超时后，仍然能把那次完整 history 交给长期记忆总结；
+	// 2. 即使同一个 historyKey 紧接着又开启了新一轮会话，也不会把旧会话内容冲掉。
+	closed []ConversationSnapshot
 }
 
 func newHistoryStore(settings sessionWindowProvider, dsn string) (*historyStore, error) {
@@ -118,6 +124,27 @@ func (s *historyStore) SnapshotAll(now time.Time) []ConversationSnapshot {
 		return conversations[i].LastActive.After(conversations[j].LastActive)
 	})
 	return conversations
+}
+
+func (s *historyStore) PopExpiredSessions(now time.Time) []ConversationSnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// 先按当前时间把已结束 session 从活动窗口里摘出来并排队，
+	// 再把这一批“刚关闭的完整会话”一次性取走交给上层处理。
+	if s.pruneExpiredLocked(now) {
+		s.saveLocked()
+	}
+	if len(s.closed) == 0 {
+		return nil
+	}
+	items := make([]ConversationSnapshot, len(s.closed))
+	copy(items, s.closed)
+	s.closed = nil
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].LastActive.Before(items[j].LastActive)
+	})
+	return items
 }
 
 func (s *historyStore) Reset() error {
@@ -222,6 +249,11 @@ func (s *historyStore) ensureEntryLocked(session any, now time.Time, touch bool)
 	key := conversationKey(session)
 	entry, ok := s.entries[key]
 	if !ok || now.Sub(entry.lastActive) > s.sessionWindowLocked() {
+		// 这里既处理“第一次出现这个 key”，也处理“同一个 key 的上一段会话已经过期”。
+		// 如果是后者，要先把旧会话排进 closed，避免后面被新会话覆盖掉。
+		if ok {
+			s.enqueueClosedEntryLocked(entry)
+		}
 		entry = &conversationHistory{
 			id:         key,
 			startedAt:  now,
@@ -244,10 +276,23 @@ func (s *historyStore) pruneExpiredLocked(now time.Time) bool {
 		if now.Sub(entry.lastActive) <= window {
 			continue
 		}
+		s.enqueueClosedEntryLocked(entry)
 		delete(s.entries, key)
 		changed = true
 	}
 	return changed
+}
+
+func (s *historyStore) enqueueClosedEntryLocked(entry *conversationHistory) {
+	if entry == nil {
+		return
+	}
+	s.closed = append(s.closed, ConversationSnapshot{
+		ID:         entry.id,
+		StartedAt:  entry.startedAt,
+		LastActive: entry.lastActive,
+		Messages:   cloneMessages(entry.messages),
+	})
 }
 
 func (s *historyStore) saveLocked() {

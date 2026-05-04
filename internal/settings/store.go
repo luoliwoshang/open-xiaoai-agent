@@ -22,6 +22,7 @@ type Snapshot struct {
 	IMDeliveryEnabled    bool   `json:"im_delivery_enabled"`
 	IMSelectedAccountID  string `json:"im_selected_account_id"`
 	IMSelectedTargetID   string `json:"im_selected_target_id"`
+	MemoryStorageDir     string `json:"memory_storage_dir"`
 }
 
 type IMDeliveryConfig struct {
@@ -75,6 +76,14 @@ func (s *Store) DeliveryConfig() IMDeliveryConfig {
 	}
 }
 
+func (s *Store) MemoryStorageDir() string {
+	dir := strings.TrimSpace(s.Snapshot().MemoryStorageDir)
+	if dir == "" {
+		return storage.DefaultMemoryStorageDir
+	}
+	return dir
+}
+
 func (s *Store) UpdateSessionWindowSeconds(seconds int) (Snapshot, error) {
 	if err := ValidateSessionWindowSeconds(seconds); err != nil {
 		return Snapshot{}, err
@@ -83,7 +92,8 @@ func (s *Store) UpdateSessionWindowSeconds(seconds int) (Snapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	snapshot := Snapshot{SessionWindowSeconds: seconds}
+	snapshot := s.snapshot
+	snapshot.SessionWindowSeconds = seconds
 	if s.db == nil {
 		s.snapshot = snapshot
 		return snapshot, nil
@@ -155,6 +165,36 @@ func (s *Store) UpdateIMDelivery(enabled bool, accountID string, targetID string
 	return next, nil
 }
 
+func (s *Store) UpdateMemoryStorageDir(dir string) (Snapshot, error) {
+	dir = strings.TrimSpace(dir)
+	if err := ValidateMemoryStorageDir(dir); err != nil {
+		return Snapshot{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	next := s.snapshot
+	next.MemoryStorageDir = dir
+
+	if s.db == nil {
+		s.snapshot = next
+		return next, nil
+	}
+
+	if _, err := s.db.Exec(
+		`UPDATE settings SET value = ?, updated_at = ? WHERE setting_key = ?`,
+		dir,
+		time.Now().UnixMilli(),
+		storage.MemoryStorageDirSettingKey,
+	); err != nil {
+		return Snapshot{}, fmt.Errorf("update memory storage dir: %w", err)
+	}
+
+	s.snapshot = next
+	return next, nil
+}
+
 func ValidateSessionWindowSeconds(seconds int) error {
 	switch {
 	case seconds < MinSessionWindowSeconds:
@@ -179,11 +219,19 @@ func ValidateIMDelivery(enabled bool, accountID string, targetID string) error {
 	return nil
 }
 
+func ValidateMemoryStorageDir(dir string) error {
+	if strings.TrimSpace(dir) == "" {
+		return fmt.Errorf("memory storage dir is required")
+	}
+	return nil
+}
+
 func (s *Store) load() (Snapshot, error) {
 	if s.db == nil {
 		return Snapshot{
 			SessionWindowSeconds: storage.DefaultSessionWindowSeconds,
 			IMDeliveryEnabled:    false,
+			MemoryStorageDir:     storage.DefaultMemoryStorageDir,
 		}, nil
 	}
 
@@ -239,11 +287,25 @@ func (s *Store) load() (Snapshot, error) {
 		selectedTargetID = ""
 	}
 
+	memoryStorageDir, err := s.readSettingValue(storage.MemoryStorageDirSettingKey)
+	if err == sql.ErrNoRows {
+		return s.repairDefault()
+	}
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("load memory storage dir: %w", err)
+	}
+	memoryStorageDir = strings.TrimSpace(memoryStorageDir)
+	if err := ValidateMemoryStorageDir(memoryStorageDir); err != nil {
+		log.Printf("settings: invalid memory storage dir found in database, falling back to default: %v", err)
+		memoryStorageDir = storage.DefaultMemoryStorageDir
+	}
+
 	return Snapshot{
 		SessionWindowSeconds: sessionWindowSeconds,
 		IMDeliveryEnabled:    imDeliveryEnabled,
 		IMSelectedAccountID:  selectedAccountID,
 		IMSelectedTargetID:   selectedTargetID,
+		MemoryStorageDir:     memoryStorageDir,
 	}, nil
 }
 
@@ -253,6 +315,7 @@ func (s *Store) repairDefault() (Snapshot, error) {
 		IMDeliveryEnabled:    false,
 		IMSelectedAccountID:  "",
 		IMSelectedTargetID:   "",
+		MemoryStorageDir:     storage.DefaultMemoryStorageDir,
 	}
 	values := []struct {
 		key   string
@@ -262,6 +325,7 @@ func (s *Store) repairDefault() (Snapshot, error) {
 		{key: storage.IMDeliveryEnabledSettingKey, value: boolToSettingValue(snapshot.IMDeliveryEnabled)},
 		{key: storage.IMSelectedAccountSettingKey, value: snapshot.IMSelectedAccountID},
 		{key: storage.IMSelectedTargetSettingKey, value: snapshot.IMSelectedTargetID},
+		{key: storage.MemoryStorageDirSettingKey, value: snapshot.MemoryStorageDir},
 	}
 	for _, item := range values {
 		if _, err := s.db.Exec(

@@ -3,6 +3,7 @@ import { useDashboardState } from './hooks/useDashboardState'
 import { Sidebar } from './components/Sidebar'
 import { DashboardPage } from './pages/DashboardPage'
 import { LogsPage } from './pages/LogsPage'
+import { MemoryPage } from './pages/MemoryPage'
 import { SettingsPage } from './pages/SettingsPage'
 
 export default function App() {
@@ -27,6 +28,7 @@ export default function App() {
         )}
         {page === 'dashboard' && <DashboardPage state={state} onReload={reload} />}
         {page === 'logs' && <LogsPage />}
+        {page === 'memory' && <MemoryPage settings={state.settings} />}
         {page === 'settings' && <SettingsPage state={state} onReload={reload} />}
       </main>
     </div>

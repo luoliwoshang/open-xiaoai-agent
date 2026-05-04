@@ -1,6 +1,8 @@
 import type {
   DashboardState,
   LogPage,
+  MemoryManagedFile,
+  MemoryUpdateLogPage,
   SessionSettings,
   WeChatLoginStart,
   WeChatLoginStatus,
@@ -36,7 +38,17 @@ export function fetchLogs(page: number, pageSize: number): Promise<LogPage> {
 }
 
 export function saveSessionSettings(s: SessionSettings): Promise<void> {
-  return json('/settings/session', { method: 'POST', body: JSON.stringify(s) })
+  return json('/settings/session', {
+    method: 'POST',
+    body: JSON.stringify({ window_seconds: s.session_window_seconds }),
+  })
+}
+
+export function saveMemorySettings(memoryStorageDir: string): Promise<void> {
+  return json('/settings/memory', {
+    method: 'POST',
+    body: JSON.stringify({ memory_storage_dir: memoryStorageDir }),
+  })
 }
 
 export function saveIMDeliverySettings(settings: {
@@ -44,7 +56,14 @@ export function saveIMDeliverySettings(settings: {
   im_selected_account_id: string
   im_selected_target_id: string
 }): Promise<void> {
-  return json('/settings/im-delivery', { method: 'POST', body: JSON.stringify(settings) })
+  return json('/settings/im-delivery', {
+    method: 'POST',
+    body: JSON.stringify({
+      enabled: settings.im_delivery_enabled,
+      selected_account_id: settings.im_selected_account_id,
+      selected_target_id: settings.im_selected_target_id,
+    }),
+  })
 }
 
 export async function startWeChatLogin(): Promise<WeChatLoginStart> {
@@ -105,7 +124,7 @@ export function sendDebugText(text: string): Promise<void> {
 
 export function sendDebugImage(file: File, caption?: string): Promise<void> {
   const form = new FormData()
-  form.append('image', file)
+  form.append('file', file)
   if (caption) form.append('caption', caption)
   return fetch(`${BASE}/im/debug/send-image-default`, { method: 'POST', body: form }).then((r) => {
     if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
@@ -123,4 +142,32 @@ export function sendDebugFile(file: File, caption?: string): Promise<void> {
 
 export function resetBackend(): Promise<void> {
   return json('/reset', { method: 'POST' })
+}
+
+export async function fetchMemoryFile(memoryKey = 'main-voice'): Promise<MemoryManagedFile> {
+  const payload = await json<{ ok: boolean; file: MemoryManagedFile }>(
+    `/memory/file?memory_key=${encodeURIComponent(memoryKey)}`,
+  )
+  return payload.file
+}
+
+export async function saveMemoryFile(memoryKey: string, content: string): Promise<MemoryManagedFile> {
+  const payload = await json<{ ok: boolean; file: MemoryManagedFile }>('/memory/file', {
+    method: 'POST',
+    body: JSON.stringify({ memory_key: memoryKey, content }),
+  })
+  return payload.file
+}
+
+export async function fetchMemoryLogs(page: number, pageSize: number, memoryKey = 'main-voice'): Promise<MemoryUpdateLogPage> {
+  const payload = await json<Partial<MemoryUpdateLogPage>>(
+    `/memory/logs?page=${page}&page_size=${pageSize}&memory_key=${encodeURIComponent(memoryKey)}`,
+  )
+  return {
+    items: Array.isArray(payload.items) ? payload.items : [],
+    page: payload.page ?? page,
+    page_size: payload.page_size ?? pageSize,
+    total: payload.total ?? 0,
+    has_more: payload.has_more ?? false,
+  }
 }

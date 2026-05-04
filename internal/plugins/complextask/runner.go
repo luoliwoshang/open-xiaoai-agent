@@ -47,7 +47,7 @@ func (r *ClaudeRunner) Run(ctx context.Context, prompt string, reporter plugin.A
 		"--output-format",
 		"stream-json",
 		"--verbose",
-		buildClaudePrompt(taskID, prompt),
+		buildClaudePrompt(taskID, prompt, buildMemoryPrompt(ctx)),
 	), reporter)
 }
 
@@ -81,7 +81,7 @@ func (r *ClaudeRunner) Resume(ctx context.Context, sourceTaskID string, prompt s
 		"--output-format",
 		"stream-json",
 		"--verbose",
-		buildClaudeResumePrompt(taskID, prompt),
+		buildClaudeResumePrompt(taskID, prompt, buildMemoryPrompt(ctx)),
 	), reporter)
 }
 
@@ -234,11 +234,11 @@ type artifactManifestEntry struct {
 	MIMEType string `json:"mime_type"`
 }
 
-func buildClaudePrompt(taskID string, task string) string {
+func buildClaudePrompt(taskID string, task string, memoryPrompt string) string {
 	task = strings.TrimSpace(task)
 	manifestPath := artifactManifestRelativePath(taskID)
 	artifactDir := artifactOutputDirRelativePath(taskID)
-	return strings.TrimSpace(fmt.Sprintf(
+	prompt := strings.TrimSpace(fmt.Sprintf(
 		`执行以下任务：%s
 
 输出要求：
@@ -262,13 +262,17 @@ func buildClaudePrompt(taskID string, task string) string {
 		artifactDir,
 		manifestPath,
 	))
+	if strings.TrimSpace(memoryPrompt) != "" {
+		prompt += "\n\n" + memoryPrompt
+	}
+	return prompt
 }
 
-func buildClaudeResumePrompt(taskID string, task string) string {
+func buildClaudeResumePrompt(taskID string, task string, memoryPrompt string) string {
 	task = strings.TrimSpace(task)
 	manifestPath := artifactManifestRelativePath(taskID)
 	artifactDir := artifactOutputDirRelativePath(taskID)
-	return strings.TrimSpace(fmt.Sprintf(
+	prompt := strings.TrimSpace(fmt.Sprintf(
 		`继续基于刚才已经完成的同一个任务接着处理。补充要求如下：%s
 
 输出要求：
@@ -293,6 +297,36 @@ func buildClaudeResumePrompt(taskID string, task string) string {
 		artifactDir,
 		manifestPath,
 	))
+	if strings.TrimSpace(memoryPrompt) != "" {
+		prompt += "\n\n" + memoryPrompt
+	}
+	return prompt
+}
+
+func buildMemoryPrompt(ctx context.Context) string {
+	memoryCtx, ok := plugin.MemoryFromContext(ctx)
+	if !ok {
+		return ""
+	}
+	memoryText := strings.TrimSpace(memoryCtx.Text)
+	if memoryText == "" {
+		return ""
+	}
+	memoryKey := strings.TrimSpace(memoryCtx.Key)
+	if memoryKey == "" {
+		memoryKey = "memory"
+	}
+	return strings.TrimSpace(fmt.Sprintf(`
+下面是当前用户可供参考的长期记忆，请只在确实相关时使用：
+1. 不要机械复述这段记忆。
+2. 不要把它伪装成这轮用户刚刚输入的新要求。
+3. 如果其中包含 URL、Token、密钥或其他敏感信息，只有在任务确实需要时才内部使用；不要在面向用户的进度汇报、最终总结或交付说明里主动泄露。
+4. 如果记忆和当前任务无关，就忽略它，不要硬套。
+
+记忆键：%s
+-----
+%s
+-----`, memoryKey, memoryText))
 }
 
 func (r *ClaudeRunner) importArtifacts(taskID string, reporter plugin.AsyncReporter) error {
