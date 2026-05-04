@@ -149,7 +149,7 @@ go run .
 - `-abort-after-asr`
   - 默认 `true`
 - `-post-abort-delay`
-  - 默认 `0`
+  - 默认 `1s`
 - `-parallel-intent-chat`
   - 默认 `true`
 

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/amap"
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/assistant"
@@ -32,7 +33,8 @@ func main() {
 	claudeCwd := flag.String("claude-cwd", "", "working directory for claude complex tasks")
 	debug := flag.Bool("debug", false, "print raw events for debugging")
 	abortAfterASR := flag.Bool("abort-after-asr", true, "abort original XiaoAI immediately before intent stage")
-	postAbortDelay := flag.Duration("post-abort-delay", 0, "delay after aborting original XiaoAI before starting playback, for example 500ms or 2s")
+	// 默认留 1 秒缓冲，避免设备侧重启原生小爱后立刻播报时吞掉开头几个字。
+	postAbortDelay := flag.Duration("post-abort-delay", 1*time.Second, "delay after aborting original XiaoAI before starting playback; default 1s to avoid swallowing the beginning of TTS after restart")
 	useParallelIntentChat := flag.Bool("parallel-intent-chat", true, "run intent and main chat reply in parallel, and reuse speculative reply when no tool is selected")
 	flag.Parse()
 
