@@ -93,6 +93,7 @@ func (r *IntentRecognizer) Decide(ctx context.Context, history []Message, text s
 		completedTasks = strings.TrimSpace(r.taskContext.CompletedTasksForIntent(5))
 	}
 	messages := buildIntentMessages(history, text, completedTasks)
+	logPreparedIntentRequest(r.config.Model, history, messages, availableTools)
 
 	// 这里把已注册工具定义一并传给模型：
 	// 如果模型稳定支持 OpenAI tool call，就可能直接返回某个 tool call；
@@ -234,6 +235,29 @@ func buildIntentSystemPrompt() string {
 14. 如果任务链摘要里给出了 latest_task_id，那么 task_id 必须填写对应摘要里的 latest_task_id，不要编造，也不要回退到更早的任务 ID。
 15. 如果用户这次更像是在追一个仍在执行中的任务状态，而不是继续一个已经完成的任务，不要调用 continue_task，优先考虑 query_task_progress。
 `)
+}
+
+// logPreparedIntentRequest 把“这一轮 intent 到底给模型发了什么”完整记下来。
+//
+// 这类日志主要给调试 continue_task 命中、历史拼接以及 system prompt 变更使用，
+// 因此这里按 message 粒度逐条打印，而不是只记一个 messages=N 的摘要。
+// content 用 %q 输出，避免多行 prompt 在日志页里被拆成难读的多条记录。
+func logPreparedIntentRequest(model string, history []Message, messages []Message, tools []ToolDefinition) {
+	log.Printf(
+		"intent request prepared: model=%s tool_count=%d history_count=%d messages=%d",
+		strings.TrimSpace(model),
+		len(tools),
+		len(history),
+		len(messages),
+	)
+	for i, message := range messages {
+		log.Printf(
+			"intent message[%d]: role=%s content=%q",
+			i,
+			strings.TrimSpace(message.Role),
+			strings.TrimSpace(message.Content),
+		)
+	}
 }
 
 func resolveToolName(explicitName string, reason string, content string, tools []ToolDefinition) (string, bool) {
