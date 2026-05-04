@@ -43,7 +43,15 @@ jobs:
         env:
           GOCACHE: ${{ github.workspace }}/.gocache
           OPEN_XIAOAI_AGENT_TEST_MYSQL_DSN: root:root@tcp(127.0.0.1:3306)/open_xiaoai_agent_test
-        run: go test ./...
+        run: go test -coverprofile=coverage.out -coverpkg=./... ./...
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.out
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   web-build:
     name: Web Build
