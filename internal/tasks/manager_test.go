@@ -118,7 +118,7 @@ func TestManagerCancelLatest(t *testing.T) {
 	}
 }
 
-func TestCompletedTasksForIntentIncludesPluginSummary(t *testing.T) {
+func TestCompletedTasksForIntentUsesRootTaskSnapshot(t *testing.T) {
 	t.Helper()
 
 	manager, err := NewManager(testmysql.NewDSN(t), t.TempDir())
@@ -133,6 +133,7 @@ func TestCompletedTasksForIntentIncludesPluginSummary(t *testing.T) {
 			Plugin:    "complex_task",
 			Kind:      "complex_task",
 			Title:     "做网页",
+			Input:     "帮我做一个关于天气的小游戏",
 			State:     StateCompleted,
 			Summary:   "已经做好一个可交付网页，文件放在桌面。",
 			CreatedAt: now,
@@ -141,8 +142,146 @@ func TestCompletedTasksForIntentIncludesPluginSummary(t *testing.T) {
 	}
 
 	text := manager.CompletedTasksForIntent(3)
-	if !strings.Contains(text, "task_id=task_1 plugin=complex_task title=做网页 summary=已经做好一个可交付网页，文件放在桌面。") {
+	if !strings.Contains(text, "latest_task_id=task_1") {
 		t.Fatalf("text = %q", text)
+	}
+	if !strings.Contains(text, "plugin=complex_task") {
+		t.Fatalf("text = %q", text)
+	}
+	if !strings.Contains(text, "root_title=做网页") {
+		t.Fatalf("text = %q", text)
+	}
+	if !strings.Contains(text, "root_input=帮我做一个关于天气的小游戏") {
+		t.Fatalf("text = %q", text)
+	}
+	if !strings.Contains(text, "recent_followups=无") {
+		t.Fatalf("text = %q", text)
+	}
+	if !strings.Contains(text, "latest_summary=已经做好一个可交付网页，文件放在桌面。") {
+		t.Fatalf("text = %q", text)
+	}
+}
+
+func TestCompletedTasksForIntentCollapsesContinuationChain(t *testing.T) {
+	t.Helper()
+
+	manager, err := NewManager(testmysql.NewDSN(t), t.TempDir())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	now := time.Now()
+	manager.state.Tasks = []Task{
+		{
+			ID:        "task_1",
+			Plugin:    "complex_task",
+			Kind:      "complex_task",
+			Title:     "天气小游戏",
+			Input:     "帮我做一个关于天气的小游戏",
+			State:     StateCompleted,
+			Summary:   "第一版小游戏已经完成。",
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+		{
+			ID:           "task_2",
+			Plugin:       "complex_task",
+			Kind:         "complex_task",
+			Title:        "接续：天气小游戏",
+			Input:        "加一点动画",
+			ParentTaskID: "task_1",
+			State:        StateCompleted,
+			Summary:      "已经补上基础动画。",
+			CreatedAt:    now.Add(1 * time.Minute),
+			UpdatedAt:    now.Add(1 * time.Minute),
+		},
+		{
+			ID:           "task_3",
+			Plugin:       "complex_task",
+			Kind:         "complex_task",
+			Title:        "接续：接续：天气小游戏",
+			Input:        "再炫酷一点",
+			ParentTaskID: "task_2",
+			State:        StateCompleted,
+			Summary:      "当前版本已经加入更强的动画效果和视觉强化。",
+			CreatedAt:    now.Add(2 * time.Minute),
+			UpdatedAt:    now.Add(2 * time.Minute),
+		},
+	}
+
+	text := manager.CompletedTasksForIntent(5)
+	if !strings.Contains(text, "latest_task_id=task_3") {
+		t.Fatalf("text = %q", text)
+	}
+	if strings.Contains(text, "latest_task_id=task_1") || strings.Contains(text, "latest_task_id=task_2") {
+		t.Fatalf("text = %q, want only latest task id", text)
+	}
+	if !strings.Contains(text, "root_title=天气小游戏") {
+		t.Fatalf("text = %q", text)
+	}
+	if !strings.Contains(text, "root_input=帮我做一个关于天气的小游戏") {
+		t.Fatalf("text = %q", text)
+	}
+	if !strings.Contains(text, "recent_followups=加一点动画；再炫酷一点") {
+		t.Fatalf("text = %q", text)
+	}
+	if !strings.Contains(text, "latest_summary=当前版本已经加入更强的动画效果和视觉强化。") {
+		t.Fatalf("text = %q", text)
+	}
+}
+
+func TestCompletedTasksForIntentSkipsChainWhenLatestNodeIsNotCompleted(t *testing.T) {
+	t.Helper()
+
+	manager, err := NewManager(testmysql.NewDSN(t), t.TempDir())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	now := time.Now()
+	manager.state.Tasks = []Task{
+		{
+			ID:        "task_1",
+			Plugin:    "complex_task",
+			Kind:      "complex_task",
+			Title:     "天气小游戏",
+			Input:     "帮我做一个关于天气的小游戏",
+			State:     StateCompleted,
+			Summary:   "第一版小游戏已经完成。",
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+		{
+			ID:           "task_2",
+			Plugin:       "complex_task",
+			Kind:         "complex_task",
+			Title:        "接续：天气小游戏",
+			Input:        "再加一点音效",
+			ParentTaskID: "task_1",
+			State:        StateRunning,
+			Summary:      "Claude 正在补音效。",
+			CreatedAt:    now.Add(1 * time.Minute),
+			UpdatedAt:    now.Add(1 * time.Minute),
+		},
+		{
+			ID:        "task_10",
+			Plugin:    "complex_task",
+			Kind:      "complex_task",
+			Title:     "故事文件",
+			Input:     "帮我写一个小故事文件",
+			State:     StateCompleted,
+			Summary:   "故事文件已经准备好。",
+			CreatedAt: now.Add(2 * time.Minute),
+			UpdatedAt: now.Add(2 * time.Minute),
+		},
+	}
+
+	text := manager.CompletedTasksForIntent(5)
+	if strings.Contains(text, "天气小游戏") || strings.Contains(text, "task_2") {
+		t.Fatalf("text = %q, want running chain excluded", text)
+	}
+	if !strings.Contains(text, "latest_task_id=task_10") {
+		t.Fatalf("text = %q, want completed chain still included", text)
 	}
 }
 
