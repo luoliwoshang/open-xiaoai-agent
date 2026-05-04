@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/luoliwoshang/open-xiaoai-agent/internal/plugin"
@@ -53,24 +54,20 @@ func Register(registry *plugin.Registry, manager TaskLookup, resumes *ResumeRegi
 		Definition: plugin.Definition{
 			Name:        "continue_task",
 			Summary:     "续任务",
-			Description: "接续一个之前已经完成的异步任务。当用户是在补充、修改、继续之前做完的网页、文档、文件或电脑任务时调用。必须提供 plugin_name、task_id 和新的补充要求 request。",
+			Description: "接续一个之前已经完成的异步任务。当用户是在补充、修改、继续之前做完的网页、文档、文件或电脑任务时调用。必须提供 task_id 和新的补充要求 request。task_id 应该指向那条任务链当前最新的已完成节点。",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"plugin_name": map[string]any{
-						"type":        "string",
-						"description": "要接续的任务所属插件名，例如 complex_task。",
-					},
 					"task_id": map[string]any{
 						"type":        "string",
-						"description": "要接续的已完成任务 ID。",
+						"description": "要接续的任务链当前最新已完成任务 ID。",
 					},
 					"request": map[string]any{
 						"type":        "string",
 						"description": "用户新的补充要求或修改要求。",
 					},
 				},
-				"required": []string{"plugin_name", "task_id", "request"},
+				"required": []string{"task_id", "request"},
 			},
 		},
 		Handler: func(ctx context.Context, callCtx plugin.CallContext, arguments json.RawMessage) (plugin.Result, error) {
@@ -84,18 +81,17 @@ func Register(registry *plugin.Registry, manager TaskLookup, resumes *ResumeRegi
 			}
 
 			var args struct {
-				PluginName string `json:"plugin_name"`
-				TaskID     string `json:"task_id"`
-				Request    string `json:"request"`
+				TaskID  string `json:"task_id"`
+				Request string `json:"request"`
 			}
 			if err := json.Unmarshal(arguments, &args); err != nil {
 				return plugin.Result{}, fmt.Errorf("decode continue task arguments: %w", err)
 			}
 
-			args.PluginName = strings.TrimSpace(args.PluginName)
 			args.TaskID = strings.TrimSpace(args.TaskID)
 			args.Request = strings.TrimSpace(args.Request)
-			if args.PluginName == "" || args.TaskID == "" || args.Request == "" {
+			log.Printf("continue_task request received: task_id=%s request=%q", args.TaskID, args.Request)
+			if args.TaskID == "" || args.Request == "" {
 				return plugin.Result{Text: "你想在刚刚哪个任务基础上继续补充什么要求？"}, nil
 			}
 
@@ -107,9 +103,19 @@ func Register(registry *plugin.Registry, manager TaskLookup, resumes *ResumeRegi
 			if taskPlugin == "" {
 				taskPlugin = strings.TrimSpace(task.Kind)
 			}
-			if taskPlugin != args.PluginName {
-				return plugin.Result{Text: "这个任务和指定插件对不上，我先不继续处理。"}, nil
+			if taskPlugin == "" {
+				return plugin.Result{Text: "这个任务没有可用的执行插件，我先不继续处理。"}, nil
 			}
+			log.Printf(
+				"continue_task resolved task: task_id=%s plugin=%s title=%q parent_task_id=%s input=%q summary=%q result=%q",
+				task.ID,
+				taskPlugin,
+				strings.TrimSpace(task.Title),
+				strings.TrimSpace(task.ParentTaskID),
+				strings.TrimSpace(task.Input),
+				strings.TrimSpace(task.Summary),
+				strings.TrimSpace(task.Result),
+			)
 
 			title := strings.TrimSpace(task.Title)
 			if title == "" {

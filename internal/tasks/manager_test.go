@@ -118,31 +118,169 @@ func TestManagerCancelLatest(t *testing.T) {
 	}
 }
 
-func TestCompletedTasksForIntentIncludesPluginSummary(t *testing.T) {
-	t.Helper()
-
-	manager, err := NewManager(testmysql.NewDSN(t), t.TempDir())
-	if err != nil {
-		t.Fatalf("NewManager() error = %v", err)
-	}
+func TestCompletedTasksForIntentRootTaskPrompt(t *testing.T) {
+	t.Parallel()
 
 	now := time.Now()
-	manager.state.Tasks = []Task{
-		{
-			ID:        "task_1",
-			Plugin:    "complex_task",
-			Kind:      "complex_task",
-			Title:     "做网页",
-			State:     StateCompleted,
-			Summary:   "已经做好一个可交付网页，文件放在桌面。",
-			CreatedAt: now,
-			UpdatedAt: now,
+	manager := &Manager{
+		state: fileState{
+			Tasks: []Task{
+				{
+					ID:        "task_1",
+					Plugin:    "complex_task",
+					Kind:      "complex_task",
+					Title:     "做网页",
+					Input:     "帮我做一个关于天气的小游戏",
+					State:     StateCompleted,
+					Summary:   "已经做好一个可交付网页，文件放在桌面。",
+					CreatedAt: now,
+					UpdatedAt: now,
+				},
+			},
 		},
 	}
 
-	text := manager.CompletedTasksForIntent(3)
-	if !strings.Contains(text, "task_id=task_1 plugin=complex_task title=做网页 summary=已经做好一个可交付网页，文件放在桌面。") {
-		t.Fatalf("text = %q", text)
+	got := manager.CompletedTasksForIntent(3)
+	want := strings.TrimSpace(`
+下面是最近可继续的任务链摘要。每条摘要都代表一条任务链当前最新的已完成节点。
+如果用户现在是在补充、修改、继续之前已经做完的任务，请优先从下面选择最匹配的一条，并调用 continue_task。
+注意：调用 continue_task 时，task_id 必须填写对应摘要里的 latest_task_id，不要自己编造。
+
+[latest_task_id=task_1]
+初始任务需求：帮我做一个关于天气的小游戏
+中间轮次对话：无
+任务最后回答：已经做好一个可交付网页，文件放在桌面。`)
+
+	if got != want {
+		t.Fatalf("CompletedTasksForIntent() = %q, want %q", got, want)
+	}
+}
+
+func TestCompletedTasksForIntentContinuationChainPrompt(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	manager := &Manager{
+		state: fileState{
+			Tasks: []Task{
+				{
+					ID:        "task_1",
+					Plugin:    "complex_task",
+					Kind:      "complex_task",
+					Title:     "天气小游戏",
+					Input:     "帮我做一个关于天气的小游戏",
+					State:     StateCompleted,
+					Summary:   "第一版小游戏已经完成。",
+					CreatedAt: now,
+					UpdatedAt: now,
+				},
+				{
+					ID:           "task_2",
+					Plugin:       "complex_task",
+					Kind:         "complex_task",
+					Title:        "接续：天气小游戏",
+					Input:        "加一点动画",
+					ParentTaskID: "task_1",
+					State:        StateCompleted,
+					Summary:      "已经补上基础动画。",
+					CreatedAt:    now.Add(1 * time.Minute),
+					UpdatedAt:    now.Add(1 * time.Minute),
+				},
+				{
+					ID:           "task_3",
+					Plugin:       "complex_task",
+					Kind:         "complex_task",
+					Title:        "接续：接续：天气小游戏",
+					Input:        "再炫酷一点",
+					ParentTaskID: "task_2",
+					State:        StateCompleted,
+					Summary:      "当前版本已经加入更强的动画效果和视觉强化。",
+					CreatedAt:    now.Add(2 * time.Minute),
+					UpdatedAt:    now.Add(2 * time.Minute),
+				},
+			},
+		},
+	}
+
+	got := manager.CompletedTasksForIntent(5)
+	want := strings.TrimSpace(`
+下面是最近可继续的任务链摘要。每条摘要都代表一条任务链当前最新的已完成节点。
+如果用户现在是在补充、修改、继续之前已经做完的任务，请优先从下面选择最匹配的一条，并调用 continue_task。
+注意：调用 continue_task 时，task_id 必须填写对应摘要里的 latest_task_id，不要自己编造。
+
+[latest_task_id=task_3]
+初始任务需求：帮我做一个关于天气的小游戏
+中间轮次对话：
+- 任务执行器：第一版小游戏已经完成。
+- 用户追加输入：加一点动画
+- 任务执行器：已经补上基础动画。
+- 用户追加输入：再炫酷一点
+- 任务执行器：当前版本已经加入更强的动画效果和视觉强化。
+任务最后回答：当前版本已经加入更强的动画效果和视觉强化。`)
+
+	if got != want {
+		t.Fatalf("CompletedTasksForIntent() = %q, want %q", got, want)
+	}
+}
+
+func TestCompletedTasksForIntentSkipsChainWhenLatestNodeIsNotCompleted(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	manager := &Manager{
+		state: fileState{
+			Tasks: []Task{
+				{
+					ID:        "task_1",
+					Plugin:    "complex_task",
+					Kind:      "complex_task",
+					Title:     "天气小游戏",
+					Input:     "帮我做一个关于天气的小游戏",
+					State:     StateCompleted,
+					Summary:   "第一版小游戏已经完成。",
+					CreatedAt: now,
+					UpdatedAt: now,
+				},
+				{
+					ID:           "task_2",
+					Plugin:       "complex_task",
+					Kind:         "complex_task",
+					Title:        "接续：天气小游戏",
+					Input:        "再加一点音效",
+					ParentTaskID: "task_1",
+					State:        StateRunning,
+					Summary:      "Claude 正在补音效。",
+					CreatedAt:    now.Add(1 * time.Minute),
+					UpdatedAt:    now.Add(1 * time.Minute),
+				},
+				{
+					ID:        "task_10",
+					Plugin:    "complex_task",
+					Kind:      "complex_task",
+					Title:     "故事文件",
+					Input:     "帮我写一个小故事文件",
+					State:     StateCompleted,
+					Summary:   "故事文件已经准备好。",
+					CreatedAt: now.Add(2 * time.Minute),
+					UpdatedAt: now.Add(2 * time.Minute),
+				},
+			},
+		},
+	}
+
+	got := manager.CompletedTasksForIntent(5)
+	want := strings.TrimSpace(`
+下面是最近可继续的任务链摘要。每条摘要都代表一条任务链当前最新的已完成节点。
+如果用户现在是在补充、修改、继续之前已经做完的任务，请优先从下面选择最匹配的一条，并调用 continue_task。
+注意：调用 continue_task 时，task_id 必须填写对应摘要里的 latest_task_id，不要自己编造。
+
+[latest_task_id=task_10]
+初始任务需求：帮我写一个小故事文件
+中间轮次对话：无
+任务最后回答：故事文件已经准备好。`)
+
+	if got != want {
+		t.Fatalf("CompletedTasksForIntent() = %q, want %q", got, want)
 	}
 }
 

@@ -50,6 +50,8 @@
 
 - 支持把用户输入路由成普通聊天、工具调用、异步任务、继续任务、查询任务等不同路径
 - 工具结果通常不会原样机械播报，而是经过 `reply` 模型整理后再回复
+- `continue_task` 当前不是看单条 task，而是看按任务链折叠后的自然语言摘要
+- `continue_task` 当前只要求命中 `task_id` 和新的补充要求，插件名由后端按 task 自己解析
 - 当前内置工具包括：
   - `ask_weather`
   - `ask_stock`
@@ -58,6 +60,10 @@
   - `query_task_progress`
   - `cancel_task`
   - `continue_task`
+
+工具意图识别、尤其是 `continue_task` 的链式摘要拼接方式，可参考：
+
+- `docs/tool-intent-routing.md`
 
 ### 2.4 异步任务系统
 
