@@ -95,7 +95,6 @@ flowchart TD
 当前内置工具：
 
 - `ask_weather`
-- `ask_stock`
 - `list_tools`
 - `complex_task`
 - `query_task_progress`

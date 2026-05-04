@@ -62,9 +62,9 @@ func TestRegistryRejectsDuplicateTool(t *testing.T) {
 	registry := NewRegistry()
 	tool := Tool{
 		Definition: Definition{
-			Name:        "ask_stock",
-			Summary:     "查股票",
-			Description: "查询股票",
+			Name:        "ask_time",
+			Summary:     "看时间",
+			Description: "查询时间",
 		},
 		Handler: func(ctx context.Context, callCtx CallContext, arguments json.RawMessage) (Result, error) {
 			_ = callCtx
@@ -159,12 +159,12 @@ func TestListToolsStyleHandlerCanReadRegistry(t *testing.T) {
 	})
 	register(Tool{
 		Definition: Definition{
-			Name:        "ask_stock",
-			Summary:     "查股票",
-			Description: "查询股票",
+			Name:        "ask_time",
+			Summary:     "看时间",
+			Description: "查询时间",
 		},
 		Handler: func(ctx context.Context, callCtx CallContext, arguments json.RawMessage) (Result, error) {
-			return Result{Text: "股票不错！"}, nil
+			return Result{Text: "现在时间不错！"}, nil
 		},
 	})
 	register(Tool{
@@ -190,7 +190,7 @@ func TestListToolsStyleHandlerCanReadRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
-	if result.Text != "查股票、查天气" {
+	if result.Text != "看时间、查天气" {
 		t.Fatalf("result.Text = %q", result.Text)
 	}
 }

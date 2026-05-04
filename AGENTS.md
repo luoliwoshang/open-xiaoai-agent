@@ -369,7 +369,6 @@ Plugins 通过 `internal/plugins/register.go` 注册。
 
 - `continue_chat`
 - `ask_weather`
-- `ask_stock`
 - `list_tools`
 - `complex_task`
 - `query_task_progress`

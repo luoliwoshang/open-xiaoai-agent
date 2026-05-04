@@ -76,7 +76,6 @@
 - `continue_task` 当前只要求命中 `task_id` 和新的补充要求，插件名由后端按 task 自己解析
 - 当前内置工具包括：
   - `ask_weather`
-  - `ask_stock`
   - `list_tools`
   - `complex_task`
   - `query_task_progress`
@@ -338,7 +337,6 @@
 ### 4.1 实时信息工具
 
 - 天气查询
-- 股票查询
 
 ### 4.2 系统说明工具
 
@@ -374,7 +372,6 @@
 
 - 即时工具
   - 天气
-  - 股票
 - 异步任务系统
   - 接任务
   - 查进度

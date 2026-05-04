@@ -9,7 +9,7 @@
 当前工具意图识别的几类主要分流是：
 
 - 普通聊天、解释、建议、延伸问答：`continue_chat`
-- 明确取数：例如 `ask_weather`、`ask_stock`
+- 明确取数：例如 `ask_weather`
 - 明确要在本机执行并产出文件 / 网页 / 文档：`complex_task`
 - 明确是在继续已经做完的那件事：`continue_task`
 - 明确是在追当前任务状态：`query_task_progress`
