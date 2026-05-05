@@ -552,7 +552,7 @@ func TestHandleUserTextDoesNotPrepareTwiceForToolCall(t *testing.T) {
 	}
 }
 
-func TestHandleUserTextUsesMemoryForReplyButNotIntent(t *testing.T) {
+func TestHandleUserTextUsesMemoryForIntentAndReply(t *testing.T) {
 	t.Parallel()
 
 	memoryService := &fakeMemoryService{
@@ -567,8 +567,11 @@ func TestHandleUserTextUsesMemoryForReplyButNotIntent(t *testing.T) {
 			onDecide: func(history []llm.Message, text string) llm.IntentDecision {
 				_ = text
 				intentHistoryChecked = true
-				if len(history) != 0 {
-					t.Fatalf("intent history should not contain memory system message, got %#v", history)
+				if len(history) == 0 {
+					t.Fatal("intent history is empty, want prepended memory message")
+				}
+				if history[0].Role != "system" || !strings.Contains(history[0].Content, "Home Assistant") {
+					t.Fatalf("intent memory message = %+v", history[0])
 				}
 				return llm.IntentDecision{ShouldHandle: false}
 			},

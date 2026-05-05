@@ -182,14 +182,14 @@ Dashboard 现在还有一个单独的 `长期记忆` 页面。
 
 - debug ASR 仍然写入主语音历史 `main-voice`
 - reply 会按 `main-voice` 读取长期记忆
-- intent 不会读取长期记忆
+- intent 也会按 `main-voice` 读取长期记忆
 - `complex_task` / `continue_task` 也会拿到这份长期记忆
 
 所以从 dashboard 里手动送入一句文本，本质上是在调试：
 
 - 主流程路由
 - 主语音历史
-- 长期记忆参与 reply / task 的实际效果
+- 长期记忆参与 intent / reply / task 的实际效果
 
 ## 10. 和单通道语音调度的关系
 

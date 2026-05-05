@@ -158,6 +158,7 @@ func (r *IntentRecognizer) Decide(ctx context.Context, history []Message, text s
 // buildIntentMessages 负责把这轮意图识别真正要发给模型的消息列表固定下来。
 //
 // 这里把 continue_task 的任务链摘要单独作为一条 system message 插进去，
+// 而 history 这一段则允许上层提前拼入长期记忆 system message。
 // 这样后续测试可以直接对整个 []Message 做全文断言，而不用再从 HTTP 请求体里反推 prompt。
 func buildIntentMessages(history []Message, text string, completedTasks string) []Message {
 	messages := []Message{
