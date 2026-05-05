@@ -87,7 +87,7 @@ func Register(registry *plugin.Registry, service *Service) error {
 			title := summarizeTitle(args.Request)
 			memoryCtx, hasMemory := plugin.MemoryFromContext(ctx)
 			return plugin.Result{
-				Text:       "收到！这个任务我让我的同事去干了！你现在可以继续和我对话哦！",
+				Text:       "我这就去做！",
 				OutputMode: plugin.OutputModeAsyncAccept,
 				AsyncTask: &plugin.AsyncTask{
 					Plugin: "complex_task",

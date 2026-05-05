@@ -1136,7 +1136,7 @@ func TestHandleUserTextAcceptsAsyncTask(t *testing.T) {
 		fakeTools{
 			onCall: func(name string) plugin.Result {
 				return plugin.Result{
-					Text:       "收到，我先去处理。",
+					Text:       "我这就去做！",
 					OutputMode: plugin.OutputModeAsyncAccept,
 					AsyncTask: &plugin.AsyncTask{
 						Kind:  "complex_task",

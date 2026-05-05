@@ -141,14 +141,10 @@ func Register(registry *plugin.Registry, manager TaskLookup, resumes *ResumeRegi
 				strings.TrimSpace(task.Result),
 			)
 
-			title := strings.TrimSpace(task.Title)
-			if title == "" {
-				title = "之前那个任务"
-			}
 			memoryCtx, hasMemory := plugin.MemoryFromContext(ctx)
 
 			return plugin.Result{
-				Text:       fmt.Sprintf("好，我就在“%s”这个任务基础上继续处理。", title),
+				Text:       "我这就去做！",
 				OutputMode: plugin.OutputModeAsyncAccept,
 				AsyncTask: &plugin.AsyncTask{
 					Plugin:       taskPlugin,

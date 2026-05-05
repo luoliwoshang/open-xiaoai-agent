@@ -521,7 +521,7 @@ func (s *Service) handleToolCall(historyKey string, channel voice.Channel, model
 // 这里不会真正执行任务主体逻辑；真正的执行由 tasks.Manager / plugin.AsyncTask.Run
 // 在后台继续推进。当前函数只做 3 件事：
 // 1. 把工具返回的 AsyncTask 规格提交给任务系统，生成任务记录；
-// 2. 立刻向用户播报一段“已受理，我先去处理”的受理文案；
+// 2. 立刻向用户播报一段简短的“任务已受理”文案；
 // 3. 把这段受理文案写入会话历史，方便后续上下文继续引用。
 //
 // 也就是说：
@@ -552,7 +552,7 @@ func (s *Service) handleAsyncTask(historyKey string, channel voice.Channel, turn
 	// 如果工具没显式提供，就使用一条默认受理话术。
 	replyText := strings.TrimSpace(result.Text)
 	if replyText == "" {
-		replyText = "收到，这个任务我先去处理。"
+		replyText = "我这就去做！"
 	}
 
 	// 这里只播放受理反馈，不等待后台任务完成。
