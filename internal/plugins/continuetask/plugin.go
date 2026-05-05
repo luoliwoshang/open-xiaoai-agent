@@ -144,7 +144,7 @@ func Register(registry *plugin.Registry, manager TaskLookup, resumes *ResumeRegi
 			memoryCtx, hasMemory := plugin.MemoryFromContext(ctx)
 
 			return plugin.Result{
-				Text:       "收到，我这里去做。",
+				Text:       "我这就去做！",
 				OutputMode: plugin.OutputModeAsyncAccept,
 				AsyncTask: &plugin.AsyncTask{
 					Plugin:       taskPlugin,

@@ -105,7 +105,7 @@ func TestContinueTaskRegisterAndCall(t *testing.T) {
 	if result.AsyncTask == nil {
 		t.Fatal("result.AsyncTask = nil")
 	}
-	if result.Text != "收到，我这里去做。" {
+	if result.Text != "我这就去做！" {
 		t.Fatalf("result.Text = %q", result.Text)
 	}
 	if result.AsyncTask.Plugin != "complex_task" {
@@ -149,7 +149,7 @@ func TestContinueTaskRunningSourceInterruptsThenResumes(t *testing.T) {
 	if result.AsyncTask == nil {
 		t.Fatal("result.AsyncTask = nil")
 	}
-	if result.Text != "收到，我这里去做。" {
+	if result.Text != "我这就去做！" {
 		t.Fatalf("result.Text = %q", result.Text)
 	}
 	if _, err := result.AsyncTask.Run(context.Background(), fakeAsyncReporter{taskID: "task_2"}); err != nil {

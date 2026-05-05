@@ -50,7 +50,7 @@ sequenceDiagram
     User->>Device: 唤醒小爱并发出复杂任务
     Device->>Agent: 转发最终 ASR 文本
     Agent->>Tasks: 创建任务并写入 accepted
-    Agent-->>Device: 立即回执“收到，我先去处理”
+    Agent-->>Device: 立即回执“我这就去做”
     Agent->>Runner: 后台启动任务
     Runner-->>Tasks: 持续写入进度摘要和事件
 
@@ -63,7 +63,7 @@ sequenceDiagram
     else 在原任务基础上继续做
         Agent->>Tasks: 创建续做任务并关联父任务
         Agent->>Runner: 在原任务上下文继续执行
-        Agent-->>Device: 回执“收到，我这里去做”
+        Agent-->>Device: 回执“我这就去做”
     else 普通聊天
         Agent-->>Device: 正常回复，不被后台任务阻塞
     end
