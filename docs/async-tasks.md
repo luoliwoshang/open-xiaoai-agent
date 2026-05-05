@@ -63,7 +63,7 @@ sequenceDiagram
     else 在原任务基础上继续做
         Agent->>Tasks: 创建续做任务并关联父任务
         Agent->>Runner: 在原任务上下文继续执行
-        Agent-->>Device: 回执“好，我接着处理”
+        Agent-->>Device: 回执“收到，我这里去做”
     else 普通聊天
         Agent-->>Device: 正常回复，不被后台任务阻塞
     end
