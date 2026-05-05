@@ -151,9 +151,9 @@ func TestBuildClaudeResumePrompt(t *testing.T) {
 
 	prompt := buildClaudeResumePrompt("task_2", "把刚刚那个网页再加一个按钮", "")
 	for _, expected := range []string{
-		"继续基于刚才已经完成的同一个任务接着处理",
+		"继续基于刚才那条同一个任务链接着处理",
 		"补充要求如下：把刚刚那个网页再加一个按钮",
-		"把这次输入视为对上一个任务的补充、修改或追加要求",
+		"把这次输入视为对上一个任务的补充、修改或追加要求，不要丢掉之前已经建立的上下文",
 		".open-xiaoai-agent/deliverables/task_2",
 		".open-xiaoai-agent/artifacts/task_2.json",
 		"name 必须优先带上和真实文件一致的后缀",

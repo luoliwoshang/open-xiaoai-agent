@@ -5,11 +5,12 @@ import "time"
 type State string
 
 const (
-	StateAccepted  State = "accepted"
-	StateRunning   State = "running"
-	StateCompleted State = "completed"
-	StateFailed    State = "failed"
-	StateCanceled  State = "canceled"
+	StateAccepted   State = "accepted"
+	StateRunning    State = "running"
+	StateCompleted  State = "completed"
+	StateFailed     State = "failed"
+	StateCanceled   State = "canceled"
+	StateSuperseded State = "superseded"
 )
 
 type Task struct {

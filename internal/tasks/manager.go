@@ -114,7 +114,18 @@ func (m *Manager) SetResultReportHook(fn func()) {
 }
 
 func (m *Manager) runTask(ctx context.Context, taskID string, run func(context.Context, plugin.AsyncReporter) (string, error)) {
-	m.updateTask(taskID, func(task *Task, events *[]Event) {
+	skipRun := false
+	_ = m.updateTask(taskID, func(task *Task, events *[]Event) {
+		// 任务 goroutine 真正起跑前，可能已经被外部取消或被新的接续任务接管。
+		// 这时不要再把它错误地推进到 running。
+		if ctx.Err() != nil {
+			skipRun = true
+			return
+		}
+		if task.State != StateAccepted {
+			skipRun = true
+			return
+		}
 		task.State = StateRunning
 		task.Summary = "任务执行中"
 		task.UpdatedAt = time.Now()
@@ -126,13 +137,23 @@ func (m *Manager) runTask(ctx context.Context, taskID string, run func(context.C
 			CreatedAt: time.Now(),
 		})
 	})
+	if skipRun {
+		m.clearCancel(taskID)
+		return
+	}
 
 	result, err := run(ctx, reporter{manager: m, taskID: taskID})
 	if err != nil {
 		if ctx.Err() != nil {
+			m.clearCancel(taskID)
 			return
 		}
-		m.updateTask(taskID, func(task *Task, events *[]Event) {
+		ignored := false
+		_ = m.updateTask(taskID, func(task *Task, events *[]Event) {
+			if blocksFurtherTaskWrites(task.State) {
+				ignored = true
+				return
+			}
 			task.State = StateFailed
 			task.Summary = strings.TrimSpace(err.Error())
 			task.Result = ""
@@ -147,12 +168,15 @@ func (m *Manager) runTask(ctx context.Context, taskID string, run func(context.C
 			})
 		})
 		m.clearCancel(taskID)
+		if ignored {
+			return
+		}
 		m.notifyResultReportReady()
 		return
 	}
 
 	_ = m.updateTask(taskID, func(task *Task, events *[]Event) {
-		if task.State == StateCanceled {
+		if blocksFurtherTaskWrites(task.State) {
 			return
 		}
 		task.State = StateCompleted
@@ -205,6 +229,73 @@ func (m *Manager) CancelLatest() (*Task, error) {
 	return &copyTask, nil
 }
 
+// InterruptTask 只负责按 task_id 停掉后台执行上下文。
+//
+// 这个动作不会直接改任务状态，也不会触发“任务结果汇报”：
+// - 显式取消任务，应该走 CancelLatest / 取消语义；
+// - 接续运行中任务时，需要先中断旧执行，再由外层决定是否标成 superseded。
+func (m *Manager) InterruptTask(taskID string) error {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return fmt.Errorf("task id is required")
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for i := range m.state.Tasks {
+		if m.state.Tasks[i].ID != taskID {
+			continue
+		}
+		if !isActiveTaskState(m.state.Tasks[i].State) {
+			return nil
+		}
+		if cancel, ok := m.cancels[taskID]; ok {
+			cancel()
+			delete(m.cancels, taskID)
+		}
+		return nil
+	}
+	return fmt.Errorf("task %q not found", taskID)
+}
+
+// MarkTaskSuperseded 把一条仍可执行的旧任务标成“已被后续补充要求接管”。
+//
+// 返回值表示这次是否真的发生了状态切换：
+// - true:  当前任务原本是 accepted/running，已经切到 superseded；
+// - false: 当前任务已经不再是活跃态，例如刚好在竞态里先完成了，此时外层可以按 completed 路径继续处理。
+func (m *Manager) MarkTaskSuperseded(taskID string, summary string) (bool, error) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return false, fmt.Errorf("task id is required")
+	}
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		summary = "任务已被新的补充要求接续"
+	}
+
+	applied := false
+	err := m.updateTask(taskID, func(task *Task, events *[]Event) {
+		if !isActiveTaskState(task.State) {
+			return
+		}
+		applied = true
+		task.State = StateSuperseded
+		task.Summary = summary
+		task.Result = ""
+		task.ResultReportPending = false
+		task.UpdatedAt = time.Now()
+		*events = append(*events, Event{
+			ID:        m.nextID("event"),
+			TaskID:    taskID,
+			Type:      "superseded",
+			Message:   summary,
+			CreatedAt: time.Now(),
+		})
+	})
+	return applied, err
+}
+
 func (m *Manager) SummarizeProgress(limit int) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -245,11 +336,12 @@ func (m *Manager) GetTask(taskID string) (*Task, bool) {
 
 // CompletedTasksForIntent 生成“给 intent 模型看的最近可续接任务链摘要”。
 //
-// 这里不再平铺单个 task 行，而是把同一条 parent_task_id 链折叠成一个候选块：
+// 历史名字沿用的是 completed，但当前语义已经扩大成“最近可继续的任务链最新节点”：
 // 1. 先按任务链归并任务；
-// 2. 每条链只保留“当前最新的已完成节点”；
-// 3. 如果这条链最新节点不是 completed，则整条链不进入 continue_task 候选；
-// 4. 最后按最新节点 UpdatedAt 从新到旧排序，并按 limit 截断。
+// 2. 每条链只保留“当前最新且仍可继续的节点”；
+// 3. 可继续节点当前包括 accepted / running / completed；
+// 4. failed / canceled / superseded 默认不进入 continue_task 候选；
+// 5. 最后按最新节点 UpdatedAt 从新到旧排序，并按 limit 截断。
 func (m *Manager) CompletedTasksForIntent(limit int) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -286,8 +378,8 @@ func buildIntentTaskChainPrompt(snapshots []intentTaskChainSnapshot) string {
 	}
 
 	return strings.TrimSpace(
-		"下面是最近可继续的任务链摘要。每条摘要都代表一条任务链当前最新的已完成节点。\n" +
-			"如果用户现在是在补充、修改、继续之前已经做完的任务，请优先从下面选择最匹配的一条，并调用 continue_task。\n" +
+		"下面是最近可继续的任务链摘要。每条摘要都代表一条任务链当前最新的可继续节点，可能是执行中，也可能是已完成。\n" +
+			"如果用户现在是在补充、修改、继续刚才那条任务链，请优先从下面选择最匹配的一条，并调用 continue_task。\n" +
 			"注意：调用 continue_task 时，task_id 必须填写对应摘要里的 latest_task_id，不要自己编造。\n\n" +
 			strings.Join(blocks, "\n\n"),
 	)
@@ -346,7 +438,7 @@ func buildIntentTaskChainSnapshots(tasks []Task, limit int) []intentTaskChainSna
 	snapshots := make([]intentTaskChainSnapshot, 0, len(chains))
 	for _, chainTasks := range chains {
 		latest := latestTaskByUpdatedAt(chainTasks)
-		if strings.TrimSpace(latest.ID) == "" || latest.State != StateCompleted {
+		if strings.TrimSpace(latest.ID) == "" || !isContinuableTaskState(latest.State) {
 			continue
 		}
 
@@ -588,6 +680,8 @@ func taskStateLabel(state State) string {
 		return "失败"
 	case StateCanceled:
 		return "已取消"
+	case StateSuperseded:
+		return "已接续"
 	default:
 		return string(state)
 	}
@@ -977,7 +1071,7 @@ func (m *Manager) latestActiveTaskLocked() *Task {
 	var best *Task
 	for i := range m.state.Tasks {
 		task := &m.state.Tasks[i]
-		if task.State != StateAccepted && task.State != StateRunning {
+		if !isActiveTaskState(task.State) {
 			continue
 		}
 		if best == nil || task.UpdatedAt.After(best.UpdatedAt) {
@@ -1044,7 +1138,7 @@ func (r reporter) Update(summary string) error {
 		return nil
 	}
 	return r.manager.updateTask(r.taskID, func(task *Task, events *[]Event) {
-		if task.State == StateCanceled {
+		if blocksFurtherTaskWrites(task.State) {
 			return
 		}
 		task.Summary = summary
@@ -1065,6 +1159,9 @@ func (r reporter) Event(eventType string, message string) error {
 		return nil
 	}
 	return r.manager.updateTask(r.taskID, func(task *Task, events *[]Event) {
+		if blocksFurtherTaskWrites(task.State) {
+			return
+		}
 		*events = append(*events, Event{
 			ID:        r.manager.nextID("event"),
 			TaskID:    r.taskID,
@@ -1150,6 +1247,18 @@ func summarizeResult(result string) string {
 		return "任务已完成"
 	}
 	return result
+}
+
+func isActiveTaskState(state State) bool {
+	return state == StateAccepted || state == StateRunning
+}
+
+func isContinuableTaskState(state State) bool {
+	return isActiveTaskState(state) || state == StateCompleted
+}
+
+func blocksFurtherTaskWrites(state State) bool {
+	return state == StateCanceled || state == StateSuperseded
 }
 
 func compactTaskText(text string) string {

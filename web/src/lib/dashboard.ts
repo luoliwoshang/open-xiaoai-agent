@@ -39,6 +39,7 @@ export const stateLabels: Record<TaskState, string> = {
   completed: '已完成',
   failed: '失败',
   canceled: '已取消',
+  superseded: '已接续',
 }
 
 export function formatTime(value: string) {

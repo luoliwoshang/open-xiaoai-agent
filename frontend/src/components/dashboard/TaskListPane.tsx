@@ -12,7 +12,7 @@ interface TaskListPaneProps {
 
 export function TaskListPane({ tasks, selectedId, onSelect }: TaskListPaneProps) {
   const counts = countByState(tasks)
-  const ordered: TaskState[] = ['running', 'accepted', 'completed', 'failed', 'canceled']
+  const ordered: TaskState[] = ['running', 'accepted', 'completed', 'superseded', 'failed', 'canceled']
 
   return (
     <div className="section-card" style={{ maxHeight: 'calc(100vh - 200px)' }}>

@@ -339,7 +339,7 @@ Intent 阶段：
 - 非流式
 - 感知工具定义
 - 能看到最近会话历史
-- 能看到最近已完成任务，用于 `continue_task` 风格的路由
+- 能看到最近可继续的任务链摘要，最新节点可能是 `accepted / running / completed`，用于 `continue_task` 风格的路由
 
 Reply 阶段：
 
@@ -400,6 +400,7 @@ plugin 系统支持不同的输出模式。当前最重要的实际区分是：
 - `completed`
 - `failed`
 - `canceled`
+- `superseded`
 
 任务记录包含的通用字段有：
 
@@ -498,7 +499,7 @@ Claude artifact handoff 规则：
 
 - 主任务表只保存 `plugin` 和通用任务信息
 - 当继续一个任务时：
-  - 路由先找到一个已完成任务
+  - 路由先找到一条可继续任务链的最新节点
   - 从任务记录里识别 plugin
   - 由 plugin 读取自己的私有状态
   - plugin 再取出自己的 Claude `session_id`
@@ -514,6 +515,7 @@ Claude artifact handoff 规则：
 - 继续任务时会新建一条任务行
 - 用 `parent_task_id` 把它关联回原任务
 - 不会覆盖旧任务
+- 如果继续的是一条仍在 `accepted / running` 的任务链，旧任务会先被中断，再标记成 `superseded`
 
 ## 天气集成
 

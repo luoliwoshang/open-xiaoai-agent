@@ -16,6 +16,7 @@ function getProgressPercent(task: Task): number {
     case 'completed': return 100
     case 'failed': return 100
     case 'canceled': return 100
+    case 'superseded': return 100
   }
 }
 

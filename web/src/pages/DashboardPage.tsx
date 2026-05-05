@@ -1,4 +1,4 @@
-import { Ban, CircleCheckBig, CircleOff, FolderKanban, PlayCircle, RefreshCw } from 'lucide-react'
+import { Ban, CircleCheckBig, CircleOff, FolderKanban, GitBranchPlus, PlayCircle, RefreshCw } from 'lucide-react'
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
 import { countByState, formatTime, latest } from '../lib/dashboard'
 import type { ClaudeRecord, ConversationSnapshot, DashboardState, TaskEvent } from '../types'
@@ -74,6 +74,7 @@ export function DashboardPage({ data, loading, error, setData: _setData }: Props
       { label: '任务总数', value: data.tasks.length, Icon: FolderKanban, tone: 'neutral' },
       { label: '运行中', value: countByState(data.tasks, 'running'), Icon: PlayCircle, tone: 'running' },
       { label: '已完成', value: countByState(data.tasks, 'completed'), Icon: CircleCheckBig, tone: 'completed' },
+      { label: '已接续', value: countByState(data.tasks, 'superseded'), Icon: GitBranchPlus, tone: 'neutral' },
       { label: '失败', value: countByState(data.tasks, 'failed'), Icon: CircleOff, tone: 'failed' },
       { label: '已取消', value: countByState(data.tasks, 'canceled'), Icon: Ban, tone: 'canceled' },
     ]

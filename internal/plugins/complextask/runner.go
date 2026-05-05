@@ -18,6 +18,7 @@ import (
 
 type Runner interface {
 	Run(ctx context.Context, prompt string, reporter plugin.AsyncReporter) (string, error)
+	Interrupt(ctx context.Context, sourceTaskID string) error
 	Resume(ctx context.Context, sourceTaskID string, prompt string, reporter plugin.AsyncReporter) (string, error)
 }
 
@@ -83,6 +84,22 @@ func (r *ClaudeRunner) Resume(ctx context.Context, sourceTaskID string, prompt s
 		"--verbose",
 		buildClaudeResumePrompt(taskID, prompt, buildMemoryPrompt(ctx)),
 	), reporter)
+}
+
+func (r *ClaudeRunner) Interrupt(ctx context.Context, sourceTaskID string) error {
+	_ = ctx
+	// 当前真正停掉 Claude CLI 进程的动作，主要依赖 tasks.Manager 取消 source task 的 context。
+	// 这里先保留成 Claude 私有状态校验点：
+	// 1. 确认这条旧任务确实属于 Claude；
+	// 2. 确认后面还能拿它的 session_id 做 --resume。
+	source, ok := r.store.Get(sourceTaskID)
+	if !ok {
+		return fmt.Errorf("source claude task %q not found", sourceTaskID)
+	}
+	if strings.TrimSpace(source.SessionID) == "" {
+		return fmt.Errorf("source claude task %q has no session id", sourceTaskID)
+	}
+	return nil
 }
 
 func (r *ClaudeRunner) runCommand(ctx context.Context, taskID string, command *exec.Cmd, reporter plugin.AsyncReporter) (string, error) {
@@ -273,10 +290,10 @@ func buildClaudeResumePrompt(taskID string, task string, memoryPrompt string) st
 	manifestPath := artifactManifestRelativePath(taskID)
 	artifactDir := artifactOutputDirRelativePath(taskID)
 	prompt := strings.TrimSpace(fmt.Sprintf(
-		`继续基于刚才已经完成的同一个任务接着处理。补充要求如下：%s
+		`继续基于刚才那条同一个任务链接着处理。补充要求如下：%s
 
 输出要求：
-1. 把这次输入视为对上一个任务的补充、修改或追加要求，不要丢掉之前已经完成的上下文。
+1. 把这次输入视为对上一个任务的补充、修改或追加要求，不要丢掉之前已经建立的上下文。
 2. 执行中请持续汇报阶段性进度，但进度汇报要相对简短。
 3. 进度汇报只用自然中文短句，不要使用特殊符号、emoji、Markdown 列表、代码块或其他不利于 TTS 识别的格式。
 4. 如果任务还没有真正结束，不要提前说已经完成。
