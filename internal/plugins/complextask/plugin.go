@@ -51,7 +51,7 @@ func Register(registry *plugin.Registry, service *Service) error {
 		Definition: plugin.Definition{
 			Name:        "complex_task",
 			Summary:     "做任务",
-			Description: "受理复杂、耗时较长的任务。当用户要求制作网页、整理攻略、生成长文档、收集资料、持续执行多步骤任务，或者明确要求操作电脑、本地创建文件、修改文件、整理桌面、运行命令、在本机完成实际产出时调用。",
+			Description: "受理复杂、耗时较长的任务。当用户要求制作网页、整理攻略、生成长文档、收集资料、持续执行多步骤任务，或者明确要求操作电脑、本地创建文件、修改文件、整理桌面、运行命令、在本机完成实际产出时调用。如果用户是在要求你代为执行一个泛化的现实任务，而当前没有更专门的已注册工具，但你可以尝试借助长期记忆、联网服务、家庭自动化系统、网页后台或其它可操作环境去完成，也可以调用它，例如打开家里的灯、关闭客厅空调、去 Home Assistant 操作某个设备。",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
