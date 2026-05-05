@@ -34,14 +34,17 @@ export function TaskChainBar({ taskId, onSelect }: TaskChainBarProps) {
         {chain.map((t, i) => {
           const isCurrent = t.id === taskId
           const isLast = i === chain.length - 1
+          const label = t.title || t.kind
+          const tip = `${t.id.slice(0, 8)} · ${label}`
           return (
             <span key={t.id} className="task-chain-node">
               <button
                 className={`task-chain-item ${isCurrent ? 'current' : ''}`}
                 onClick={() => !isCurrent && onSelect?.(t.id)}
                 disabled={isCurrent}
+                title={tip}
               >
-                <span className="task-chain-id">{t.id.slice(0, 8)}</span>
+                <span className="task-chain-title">{label}</span>
                 <StatusBadge state={t.state} />
               </button>
               {!isLast && <span className="task-chain-sep">&rsaquo;</span>}
