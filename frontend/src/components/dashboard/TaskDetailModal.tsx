@@ -10,6 +10,7 @@ interface TaskDetailModalProps {
   artifacts: TaskArtifact[]
   claudeRecords: ClaudeRecord[]
   onClose: () => void
+  onSelectTask?: (taskId: string) => void
 }
 
 export function TaskDetailModal({
@@ -18,6 +19,7 @@ export function TaskDetailModal({
   artifacts,
   claudeRecords,
   onClose,
+  onSelectTask,
 }: TaskDetailModalProps) {
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -44,7 +46,7 @@ export function TaskDetailModal({
         </div>
 
         <div className="task-modal-layout">
-          <TaskDetailPane task={task} />
+          <TaskDetailPane task={task} onSelectTask={onSelectTask} />
           <TaskSideCards
             task={task}
             events={events}

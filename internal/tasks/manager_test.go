@@ -493,3 +493,66 @@ func waitForTaskState(t *testing.T, manager *Manager, taskID string, want State)
 	t.Fatalf("task %q did not reach state %q before timeout", taskID, want)
 	return Task{}
 }
+
+func TestTaskChain(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	manager := &Manager{
+		state: fileState{
+			Tasks: []Task{
+				{ID: "task_1", Title: "root", State: StateCompleted, CreatedAt: now, UpdatedAt: now},
+				{ID: "task_2", Title: "cont1", ParentTaskID: "task_1", State: StateCompleted, CreatedAt: now.Add(1 * time.Minute), UpdatedAt: now.Add(1 * time.Minute)},
+				{ID: "task_3", Title: "cont2", ParentTaskID: "task_2", State: StateRunning, CreatedAt: now.Add(2 * time.Minute), UpdatedAt: now.Add(2 * time.Minute)},
+				{ID: "task_4", Title: "other", State: StateCompleted, CreatedAt: now.Add(3 * time.Minute), UpdatedAt: now.Add(3 * time.Minute)},
+			},
+		},
+	}
+
+	// middle of chain: should return full chain in CreatedAt order
+	chain := manager.TaskChain("task_2")
+	if len(chain) != 3 {
+		t.Fatalf("TaskChain(task_2) len = %d, want 3", len(chain))
+	}
+	if chain[0].ID != "task_1" || chain[1].ID != "task_2" || chain[2].ID != "task_3" {
+		t.Fatalf("TaskChain(task_2) = %v, want [task_1 task_2 task_3]", taskIDs(chain))
+	}
+
+	// root of chain
+	chain = manager.TaskChain("task_1")
+	if len(chain) != 3 {
+		t.Fatalf("TaskChain(task_1) len = %d, want 3", len(chain))
+	}
+
+	// leaf of chain
+	chain = manager.TaskChain("task_3")
+	if len(chain) != 3 {
+		t.Fatalf("TaskChain(task_3) len = %d, want 3", len(chain))
+	}
+
+	// standalone task (no chain)
+	chain = manager.TaskChain("task_4")
+	if len(chain) != 1 {
+		t.Fatalf("TaskChain(task_4) len = %d, want 1", len(chain))
+	}
+
+	// non-existent task
+	chain = manager.TaskChain("nope")
+	if len(chain) != 0 {
+		t.Fatalf("TaskChain(nope) len = %d, want 0", len(chain))
+	}
+
+	// empty ID
+	chain = manager.TaskChain("")
+	if len(chain) != 0 {
+		t.Fatalf("TaskChain(empty) len = %d, want 0", len(chain))
+	}
+}
+
+func taskIDs(chain []Task) []string {
+	ids := make([]string, len(chain))
+	for i, t := range chain {
+		ids[i] = t.ID
+	}
+	return ids
+}

@@ -638,6 +638,80 @@ body {
   font-family: var(--font-mono);
 }
 
+/* Task chain breadcrumb */
+.task-chain-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 8px 10px;
+  background: var(--bg-elevated);
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.task-chain-label {
+  font-size: 10px;
+  color: var(--text-ghost);
+  font-family: var(--font-mono);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.task-chain-nodes {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+
+.task-chain-node {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.task-chain-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-card);
+  cursor: pointer;
+  font-size: 11px;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.task-chain-item:not(:disabled):hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+
+.task-chain-item.current {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  cursor: default;
+  font-weight: 600;
+}
+
+.task-chain-id {
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.task-chain-item.current .task-chain-id {
+  color: var(--accent);
+}
+
+.task-chain-sep {
+  color: var(--text-ghost);
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
 /* Progress bar */
 .progress-section {
   padding: 14px;

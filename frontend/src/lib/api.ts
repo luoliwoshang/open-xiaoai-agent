@@ -4,6 +4,7 @@ import type {
   MemoryManagedFile,
   MemoryUpdateLogPage,
   SessionSettings,
+  Task,
   WeChatLoginStart,
   WeChatLoginStatus,
 } from '../types'
@@ -24,6 +25,11 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function fetchState(): Promise<DashboardState> {
   return json('/state')
+}
+
+export async function fetchTaskChain(taskId: string): Promise<Task[]> {
+  const payload = await json<{ chain: Task[] }>(`/tasks/${encodeURIComponent(taskId)}/chain`)
+  return payload.chain ?? []
 }
 
 export function submitAssistantASR(text: string): Promise<{ ok: boolean; text: string }> {

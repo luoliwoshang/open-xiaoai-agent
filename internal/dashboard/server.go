@@ -235,6 +235,14 @@ func (s *Server) handleTaskArtifactDownload(w http.ResponseWriter, r *http.Reque
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/tasks/")
 	parts := strings.Split(path, "/")
+
+	// GET /api/tasks/{taskID}/chain
+	if len(parts) == 2 && parts[1] == "chain" {
+		s.handleTaskChain(w, r, strings.TrimSpace(parts[0]))
+		return
+	}
+
+	// GET /api/tasks/{taskID}/artifacts/{artifactID}/download
 	if len(parts) != 4 || parts[1] != "artifacts" || parts[3] != "download" {
 		http.NotFound(w, r)
 		return
@@ -272,6 +280,15 @@ func (s *Server) handleTaskArtifactDownload(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Disposition", buildAttachmentDisposition(artifact.FileName))
 	http.ServeContent(w, r, artifact.FileName, artifact.CreatedAt, file)
+}
+
+func (s *Server) handleTaskChain(w http.ResponseWriter, _ *http.Request, taskID string) {
+	if s.tasks == nil {
+		http.Error(w, "task manager is not configured", http.StatusServiceUnavailable)
+		return
+	}
+	chain := s.tasks.TaskChain(taskID)
+	writeJSON(w, map[string]any{"chain": chain})
 }
 
 func buildAttachmentDisposition(fileName string) string {
