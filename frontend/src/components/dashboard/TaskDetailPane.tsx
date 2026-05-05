@@ -2,9 +2,11 @@ import { Cpu } from 'lucide-react'
 import type { Task } from '../../types'
 import { formatTime, stateLabels } from '../../lib/dashboard'
 import { StatusBadge } from '../ui/StatusBadge'
+import { TaskChainBar } from './TaskChainBar'
 
 interface TaskDetailPaneProps {
   task: Task | null
+  onSelectTask?: (taskId: string) => void
 }
 
 function getProgressPercent(task: Task): number {
@@ -19,7 +21,7 @@ function getProgressPercent(task: Task): number {
 
 const PROGRESS_STEPS = ['接收', '调度', '执行', '完成', '交付']
 
-export function TaskDetailPane({ task }: TaskDetailPaneProps) {
+export function TaskDetailPane({ task, onSelectTask }: TaskDetailPaneProps) {
   if (!task) {
     return (
       <div className="section-card task-detail-card">
@@ -46,6 +48,7 @@ export function TaskDetailPane({ task }: TaskDetailPaneProps) {
           </span>
         </div>
         <div className="task-detail-title">{task.title || task.kind}</div>
+        <TaskChainBar taskId={task.id} onSelect={onSelectTask} />
         <div className="task-detail-meta">
           <div className="meta-item">
             <span className="meta-label">ID</span>
@@ -63,12 +66,6 @@ export function TaskDetailPane({ task }: TaskDetailPaneProps) {
             <span className="meta-label">更新时间</span>
             <span className="meta-value">{formatTime(task.updated_at)}</span>
           </div>
-          {task.parent_task_id && (
-            <div className="meta-item">
-              <span className="meta-label">父任务</span>
-              <span className="meta-value">{task.parent_task_id.slice(0, 8)}...</span>
-            </div>
-          )}
         </div>
       </div>
 

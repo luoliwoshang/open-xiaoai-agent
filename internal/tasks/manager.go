@@ -642,6 +642,65 @@ func (m *Manager) ArtifactsSnapshot() []Artifact {
 	return artifacts
 }
 
+func (m *Manager) TaskChain(taskID string) []Task {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return nil
+	}
+
+	byID := make(map[string]Task, len(m.state.Tasks))
+	for _, t := range m.state.Tasks {
+		byID[t.ID] = t
+	}
+
+	task, ok := byID[taskID]
+	if !ok {
+		return nil
+	}
+
+	// ancestors: walk up from current task to root
+	lineage := buildIntentTaskLineage(task, byID)
+
+	// collect all IDs in the chain so far
+	inChain := make(map[string]struct{}, len(lineage))
+	for _, t := range lineage {
+		inChain[t.ID] = struct{}{}
+	}
+
+	// descendants: find all tasks whose parent is in the chain (BFS)
+	chainSet := inChain
+	var descendants []Task
+	queue := make([]string, 0, len(lineage))
+	for _, t := range lineage {
+		queue = append(queue, t.ID)
+	}
+	for len(queue) > 0 {
+		parentID := queue[0]
+		queue = queue[1:]
+		for _, t := range m.state.Tasks {
+			if t.ParentTaskID != parentID {
+				continue
+			}
+			if _, exists := chainSet[t.ID]; exists {
+				continue
+			}
+			chainSet[t.ID] = struct{}{}
+			descendants = append(descendants, t)
+			queue = append(queue, t.ID)
+		}
+	}
+
+	// merge: ancestors + descendants, sorted by CreatedAt
+	all := append(lineage, descendants...)
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].CreatedAt.Before(all[j].CreatedAt)
+	})
+	return all
+}
+
 func (m *Manager) GetArtifact(taskID string, artifactID string) (*Artifact, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

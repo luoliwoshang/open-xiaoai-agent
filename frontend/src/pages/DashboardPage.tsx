@@ -145,6 +145,7 @@ export function DashboardPage({ state, onReload }: DashboardPageProps) {
           artifacts={state.artifacts}
           claudeRecords={state.claude_records}
           onClose={() => setSelectedTaskId(null)}
+          onSelectTask={setSelectedTaskId}
         />
       )}
     </div>
