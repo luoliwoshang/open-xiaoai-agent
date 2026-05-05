@@ -52,7 +52,7 @@ export function TaskDetailPane({ task, onSelectTask }: TaskDetailPaneProps) {
         <div className="task-detail-meta">
           <div className="meta-item">
             <span className="meta-label">ID</span>
-            <span className="meta-value">{task.id.slice(0, 8)}...</span>
+            <span className="meta-value">{task.id}</span>
           </div>
           <div className="meta-item">
             <span className="meta-label">类型</span>
