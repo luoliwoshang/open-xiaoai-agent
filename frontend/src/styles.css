@@ -697,12 +697,15 @@ body {
   font-weight: 600;
 }
 
-.task-chain-id {
-  font-family: var(--font-mono);
+.task-chain-title {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--text-secondary);
 }
 
-.task-chain-item.current .task-chain-id {
+.task-chain-item.current .task-chain-title {
   color: var(--accent);
 }
 
