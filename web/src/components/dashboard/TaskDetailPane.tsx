@@ -36,6 +36,20 @@ function buildProgressModel(task: Task, events: TaskEvent[], artifacts: TaskArti
     }
   }
 
+  if (task.state === 'superseded') {
+    return {
+      percent: hasArtifacts ? 82 : eventCount >= 2 ? 64 : 40,
+      step: hasArtifacts ? 4 : eventCount >= 2 ? 3 : 2,
+      steps: [
+        { label: '已接收', note: formatTime(task.created_at), done: true, active: false },
+        { label: '开始执行', note: eventCount > 0 ? formatTime(events[0]?.created_at ?? task.created_at) : '已开始', done: true, active: false },
+        { label: '处理中', note: '旧执行已被新的补充要求接管', done: true, active: false },
+        { label: '生成产物', note: hasArtifacts ? `${artifacts.length} 个产物` : '交给新的续做任务继续产出', done: hasArtifacts, active: !hasArtifacts },
+        { label: '完成', note: '本任务不再继续推进', done: false, active: false },
+      ],
+    }
+  }
+
   if (task.state === 'failed' || task.state === 'canceled') {
     return {
       percent: hasArtifacts ? 76 : eventCount >= 2 ? 54 : 28,

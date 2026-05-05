@@ -414,13 +414,14 @@ sequenceDiagram
 
 ## 6. 任务状态
 
-当前状态只有五种：
+当前状态有六种：
 
 - `accepted`
 - `running`
 - `completed`
 - `failed`
 - `canceled`
+- `superseded`
 
 这些状态的语义是：
 
@@ -429,12 +430,38 @@ sequenceDiagram
 - `completed`：任务已经完成，并且有最终结果
 - `failed`：任务执行失败
 - `canceled`：任务被取消
+- `superseded`：旧任务已经被新的补充要求接管，不再继续推进
 
 这里有个实践上很重要的点：
 
 - `summary` 看起来像完成，不代表状态一定已经完成
 
 所以查询进度时，不能只看一句摘要，还要同时看真实状态。
+
+### 6.1 执行中补充要求，为什么不是原地修改旧任务
+
+当前 `continue_task` 已经扩大成统一的“继续这条任务链”语义：
+
+- 如果 source task 已完成，就基于它创建新的 child task
+- 如果 source task 仍在 `accepted / running`，就先中断旧执行，再把旧 task 标成 `superseded`，然后创建新的 child task 接管这条链
+
+这里故意不做“原地把同一个 task 改参数继续跑”，原因是：
+
+- 每次用户补充输入都应该留下单独的 task 记录
+- `parent_task_id` 可以把整条任务链串起来
+- Claude 这类执行器可以继续复用原来的 session，但任务系统里的审计链路不会丢
+
+这也意味着：
+
+- `superseded` 不是失败
+- `superseded` 也不是取消
+- 它表示“旧执行被新的续做任务正式接管”
+
+对当前 Claude 执行器来说，接管动作具体就是：
+
+- 先停掉旧 task 对应的 Claude CLI 进程
+- 保留它已经建立的 `session_id`
+- 再在新的 child task 上用 `claude --resume <session_id>` 继续补充要求
 
 ## 7. 事件流和摘要为什么要同时存在
 

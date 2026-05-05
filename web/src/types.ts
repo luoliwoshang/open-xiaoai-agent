@@ -1,4 +1,4 @@
-export type TaskState = 'accepted' | 'running' | 'completed' | 'failed' | 'canceled'
+export type TaskState = 'accepted' | 'running' | 'completed' | 'failed' | 'canceled' | 'superseded'
 
 export type Task = {
   id: string

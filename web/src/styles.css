@@ -1136,6 +1136,12 @@ code {
   border-color: rgba(75, 199, 154, 0.2);
 }
 
+.status-superseded {
+  color: #4b7ac8;
+  background: rgba(122, 184, 255, 0.12);
+  border-color: rgba(122, 184, 255, 0.2);
+}
+
 .status-failed,
 .status-canceled {
   color: var(--danger);

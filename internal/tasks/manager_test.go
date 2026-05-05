@@ -142,8 +142,8 @@ func TestCompletedTasksForIntentRootTaskPrompt(t *testing.T) {
 
 	got := manager.CompletedTasksForIntent(3)
 	want := strings.TrimSpace(`
-下面是最近可继续的任务链摘要。每条摘要都代表一条任务链当前最新的已完成节点。
-如果用户现在是在补充、修改、继续之前已经做完的任务，请优先从下面选择最匹配的一条，并调用 continue_task。
+下面是最近可继续的任务链摘要。每条摘要都代表一条任务链当前最新的可继续节点，可能是执行中，也可能是已完成。
+如果用户现在是在补充、修改、继续刚才那条任务链，请优先从下面选择最匹配的一条，并调用 continue_task。
 注意：调用 continue_task 时，task_id 必须填写对应摘要里的 latest_task_id，不要自己编造。
 
 [latest_task_id=task_1]
@@ -204,8 +204,8 @@ func TestCompletedTasksForIntentContinuationChainPrompt(t *testing.T) {
 
 	got := manager.CompletedTasksForIntent(5)
 	want := strings.TrimSpace(`
-下面是最近可继续的任务链摘要。每条摘要都代表一条任务链当前最新的已完成节点。
-如果用户现在是在补充、修改、继续之前已经做完的任务，请优先从下面选择最匹配的一条，并调用 continue_task。
+下面是最近可继续的任务链摘要。每条摘要都代表一条任务链当前最新的可继续节点，可能是执行中，也可能是已完成。
+如果用户现在是在补充、修改、继续刚才那条任务链，请优先从下面选择最匹配的一条，并调用 continue_task。
 注意：调用 continue_task 时，task_id 必须填写对应摘要里的 latest_task_id，不要自己编造。
 
 [latest_task_id=task_3]
@@ -223,7 +223,7 @@ func TestCompletedTasksForIntentContinuationChainPrompt(t *testing.T) {
 	}
 }
 
-func TestCompletedTasksForIntentSkipsChainWhenLatestNodeIsNotCompleted(t *testing.T) {
+func TestCompletedTasksForIntentIncludesRunningLatestNode(t *testing.T) {
 	t.Parallel()
 
 	now := time.Now()
@@ -270,17 +270,81 @@ func TestCompletedTasksForIntentSkipsChainWhenLatestNodeIsNotCompleted(t *testin
 
 	got := manager.CompletedTasksForIntent(5)
 	want := strings.TrimSpace(`
-下面是最近可继续的任务链摘要。每条摘要都代表一条任务链当前最新的已完成节点。
-如果用户现在是在补充、修改、继续之前已经做完的任务，请优先从下面选择最匹配的一条，并调用 continue_task。
+下面是最近可继续的任务链摘要。每条摘要都代表一条任务链当前最新的可继续节点，可能是执行中，也可能是已完成。
+如果用户现在是在补充、修改、继续刚才那条任务链，请优先从下面选择最匹配的一条，并调用 continue_task。
 注意：调用 continue_task 时，task_id 必须填写对应摘要里的 latest_task_id，不要自己编造。
 
 [latest_task_id=task_10]
 初始任务需求：帮我写一个小故事文件
 中间轮次对话：无
-任务最后回答：故事文件已经准备好。`)
+任务最后回答：故事文件已经准备好。
+
+[latest_task_id=task_2]
+初始任务需求：帮我做一个关于天气的小游戏
+中间轮次对话：
+- 任务执行器：第一版小游戏已经完成。
+- 用户追加输入：再加一点音效
+- 任务执行器：Claude 正在补音效。
+任务最后回答：Claude 正在补音效。`)
 
 	if got != want {
 		t.Fatalf("CompletedTasksForIntent() = %q, want %q", got, want)
+	}
+}
+
+func TestManagerInterruptAndSupersedeRunningTask(t *testing.T) {
+	t.Helper()
+
+	manager, err := NewManager(testmysql.NewDSN(t), t.TempDir())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	task, err := manager.Submit(plugin.AsyncTask{
+		Plugin: "complex_task",
+		Kind:   "complex_task",
+		Title:  "旅行攻略",
+		Input:  "做一份旅行攻略",
+		Run: func(ctx context.Context, reporter plugin.AsyncReporter) (string, error) {
+			if err := reporter.Update("正在搜集目的地信息"); err != nil {
+				return "", err
+			}
+			<-ctx.Done()
+			return "", ctx.Err()
+		},
+	})
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+
+	waitForTaskState(t, manager, task.ID, StateRunning)
+
+	if err := manager.InterruptTask(task.ID); err != nil {
+		t.Fatalf("InterruptTask() error = %v", err)
+	}
+	applied, err := manager.MarkTaskSuperseded(task.ID, "任务已被新的补充要求接续")
+	if err != nil {
+		t.Fatalf("MarkTaskSuperseded() error = %v", err)
+	}
+	if !applied {
+		t.Fatal("MarkTaskSuperseded() applied = false, want true")
+	}
+
+	finalTask := waitForTaskState(t, manager, task.ID, StateSuperseded)
+	if finalTask.ResultReportPending {
+		t.Fatal("finalTask.ResultReportPending = true, want false")
+	}
+	if finalTask.Summary != "任务已被新的补充要求接续" {
+		t.Fatalf("finalTask.Summary = %q", finalTask.Summary)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	latestTask, ok := manager.GetTask(task.ID)
+	if !ok {
+		t.Fatalf("GetTask(%q) = not found", task.ID)
+	}
+	if latestTask.State != StateSuperseded {
+		t.Fatalf("latestTask.State = %q, want %q", latestTask.State, StateSuperseded)
 	}
 }
 

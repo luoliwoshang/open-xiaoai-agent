@@ -944,6 +944,8 @@ func taskNoticeStateLabel(state tasks.State) string {
 		return "失败"
 	case tasks.StateCanceled:
 		return "已取消"
+	case tasks.StateSuperseded:
+		return "已接续"
 	default:
 		return string(state)
 	}

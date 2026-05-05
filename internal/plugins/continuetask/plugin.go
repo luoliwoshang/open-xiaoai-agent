@@ -13,9 +13,17 @@ import (
 
 type TaskLookup interface {
 	GetTask(taskID string) (*tasks.Task, bool)
+	InterruptTask(taskID string) error
+	MarkTaskSuperseded(taskID string, summary string) (bool, error)
 }
 
+// Resumer 表示“这个 plugin 知道如何继续自己的旧任务”。
+//
+// 当前 continuation 仍然是 plugin-owned：
+// - continue_task 先根据主任务表找到 plugin；
+// - 再由具体 plugin 自己中断旧执行、读取私有状态，并在新 child task 上继续。
 type Resumer interface {
+	InterruptTask(ctx context.Context, taskID string) error
 	ResumeTask(ctx context.Context, taskID string, request string, reporter plugin.AsyncReporter) (string, error)
 }
 
@@ -39,14 +47,30 @@ func (r *ResumeRegistry) Register(pluginName string, resumer Resumer) {
 }
 
 func (r *ResumeRegistry) Resume(pluginName string, ctx context.Context, taskID string, request string, reporter plugin.AsyncReporter) (string, error) {
+	resumer, err := r.lookup(pluginName)
+	if err != nil {
+		return "", err
+	}
+	return resumer.ResumeTask(ctx, taskID, request, reporter)
+}
+
+func (r *ResumeRegistry) Interrupt(pluginName string, ctx context.Context, taskID string) error {
+	resumer, err := r.lookup(pluginName)
+	if err != nil {
+		return err
+	}
+	return resumer.InterruptTask(ctx, taskID)
+}
+
+func (r *ResumeRegistry) lookup(pluginName string) (Resumer, error) {
 	if r == nil {
-		return "", fmt.Errorf("resume registry is not configured")
+		return nil, fmt.Errorf("resume registry is not configured")
 	}
 	resumer, ok := r.items[strings.TrimSpace(pluginName)]
 	if !ok || resumer == nil {
-		return "", fmt.Errorf("resume plugin %q is not registered", pluginName)
+		return nil, fmt.Errorf("resume plugin %q is not registered", pluginName)
 	}
-	return resumer.ResumeTask(ctx, taskID, request, reporter)
+	return resumer, nil
 }
 
 func Register(registry *plugin.Registry, manager TaskLookup, resumes *ResumeRegistry) error {
@@ -54,13 +78,13 @@ func Register(registry *plugin.Registry, manager TaskLookup, resumes *ResumeRegi
 		Definition: plugin.Definition{
 			Name:        "continue_task",
 			Summary:     "续任务",
-			Description: "接续一个之前已经完成的异步任务。当用户是在补充、修改、继续之前做完的网页、文档、文件或电脑任务时调用。必须提供 task_id 和新的补充要求 request。task_id 应该指向那条任务链当前最新的已完成节点。",
+			Description: "接续一条之前已经创建过的异步任务链。当用户是在补充、修改、继续刚才那个网页、文档、文件或电脑任务时调用，不管那条任务现在是执行中还是已经完成。必须提供 task_id 和新的补充要求 request。task_id 应该指向那条任务链当前最新的可继续节点。",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"task_id": map[string]any{
 						"type":        "string",
-						"description": "要接续的任务链当前最新已完成任务 ID。",
+						"description": "要接续的任务链当前最新可继续任务 ID，可能是执行中，也可能是已完成。",
 					},
 					"request": map[string]any{
 						"type":        "string",
@@ -136,10 +160,64 @@ func Register(registry *plugin.Registry, manager TaskLookup, resumes *ResumeRegi
 						if hasMemory {
 							ctx = plugin.WithMemoryContext(ctx, memoryCtx.Key, memoryCtx.Text)
 						}
-						return resumes.Resume(taskPlugin, ctx, task.ID, args.Request, reporter)
+						return runContinuation(ctx, manager, resumes, task.ID, taskPlugin, args.Request, reporter)
 					},
 				},
 			}, nil
 		},
 	})
+}
+
+// runContinuation 是 continue_task 的最小编排层。
+//
+// 它故意不放进 ResumeRegistry 里，避免 registry 既负责“分发”，又负责“任务状态机”。
+// 当前这里统一处理三件事：
+// 1. 读取 source task 当前状态；
+// 2. 如果 source 仍在执行，先中断旧执行，并把旧任务标成 superseded；
+// 3. 再交给具体 plugin 的 ResumeTask，在新 child task 上继续。
+func runContinuation(ctx context.Context, manager TaskLookup, resumes *ResumeRegistry, taskID string, pluginName string, request string, reporter plugin.AsyncReporter) (string, error) {
+	sourceTask, ok := manager.GetTask(taskID)
+	if !ok {
+		return "", fmt.Errorf("source task %q not found", taskID)
+	}
+
+	switch sourceTask.State {
+	case tasks.StateAccepted, tasks.StateRunning:
+		log.Printf("continue_task interrupt running source task: task_id=%s plugin=%s state=%s", taskID, pluginName, sourceTask.State)
+		if err := manager.InterruptTask(taskID); err != nil {
+			return "", err
+		}
+		if err := resumes.Interrupt(pluginName, ctx, taskID); err != nil {
+			return "", err
+		}
+
+		latestTask, ok := manager.GetTask(taskID)
+		if !ok {
+			return "", fmt.Errorf("source task %q disappeared during continuation", taskID)
+		}
+		switch latestTask.State {
+		case tasks.StateAccepted, tasks.StateRunning:
+			applied, err := manager.MarkTaskSuperseded(taskID, "任务已被新的补充要求接续")
+			if err != nil {
+				return "", err
+			}
+			if applied {
+				log.Printf("continue_task source task superseded: task_id=%s plugin=%s", taskID, pluginName)
+			}
+		case tasks.StateCompleted:
+			log.Printf("continue_task source task completed during interrupt race: task_id=%s plugin=%s", taskID, pluginName)
+		case tasks.StateFailed, tasks.StateCanceled, tasks.StateSuperseded:
+			return "", fmt.Errorf("source task %q moved to state %s during continuation", taskID, latestTask.State)
+		default:
+			return "", fmt.Errorf("source task %q moved to unknown state %s during continuation", taskID, latestTask.State)
+		}
+	case tasks.StateCompleted:
+		log.Printf("continue_task reuse completed source task: task_id=%s plugin=%s", taskID, pluginName)
+	case tasks.StateFailed, tasks.StateCanceled, tasks.StateSuperseded:
+		return "", fmt.Errorf("source task %q in state %s cannot be continued", taskID, sourceTask.State)
+	default:
+		return "", fmt.Errorf("source task %q in unknown state %s cannot be continued", taskID, sourceTask.State)
+	}
+
+	return resumes.Resume(pluginName, ctx, taskID, request, reporter)
 }

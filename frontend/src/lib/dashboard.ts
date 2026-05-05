@@ -6,6 +6,7 @@ export const stateLabels: Record<TaskState, string> = {
   completed: '已完成',
   failed: '失败',
   canceled: '已取消',
+  superseded: '已接续',
 }
 
 export const emptyState: DashboardState = {
@@ -52,7 +53,7 @@ export function formatBytes(bytes: number): string {
 }
 
 export function countByState(tasks: DashboardState['tasks']): Record<TaskState, number> {
-  const counts: Record<TaskState, number> = { accepted: 0, running: 0, completed: 0, failed: 0, canceled: 0 }
+  const counts: Record<TaskState, number> = { accepted: 0, running: 0, completed: 0, failed: 0, canceled: 0, superseded: 0 }
   for (const t of tasks) counts[t.state]++
   return counts
 }

@@ -17,6 +17,7 @@ export function TaskListPane({ tasks, selectedTaskID, onSelect }: Props) {
     { label: '全部', value: tasks.length, tone: 'neutral' },
     { label: '运行中', value: countByState(tasks, 'running'), tone: 'running' },
     { label: '已完成', value: countByState(tasks, 'completed'), tone: 'completed' },
+    { label: '已接续', value: countByState(tasks, 'superseded'), tone: 'neutral' },
     { label: '失败', value: countByState(tasks, 'failed'), tone: 'failed' },
     { label: '已取消', value: countByState(tasks, 'canceled'), tone: 'canceled' },
   ]

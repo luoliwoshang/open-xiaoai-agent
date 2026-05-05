@@ -39,6 +39,13 @@ func (s *Service) ResumeTask(ctx context.Context, taskID string, request string,
 	return s.runner.Resume(ctx, taskID, request, reporter)
 }
 
+func (s *Service) InterruptTask(ctx context.Context, taskID string) error {
+	if s == nil || s.runner == nil {
+		return fmt.Errorf("claude task service is not configured")
+	}
+	return s.runner.Interrupt(ctx, taskID)
+}
+
 func Register(registry *plugin.Registry, service *Service) error {
 	return registry.Register(plugin.Tool{
 		Definition: plugin.Definition{
