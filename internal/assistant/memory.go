@@ -30,6 +30,12 @@ func withMemoryMessage(history []llm.Message, memoryText string) []llm.Message {
 		return history
 	}
 
+	// 这条 system message 会同时给：
+	// - intent 路由
+	// - 普通 reply
+	// - 工具结果整理 reply
+	//
+	// 目的是把长期稳定背景显式标出来，而不是把它混成“用户刚刚这轮输入”。
 	memoryMessage := llm.Message{
 		Role: "system",
 		Content: strings.TrimSpace(`

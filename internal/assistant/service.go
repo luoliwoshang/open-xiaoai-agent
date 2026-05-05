@@ -32,7 +32,7 @@ const MainVoiceHistoryKey = "main-voice"
 // IntentDecider 负责主流程里的“意图路由判断”。
 //
 // 它的职责不是直接生成给用户播报的最终回复，
-// 而是根据最近会话 history 和当前这轮用户输入 text，
+// 而是根据最近会话 history、已经召回的长期记忆，以及当前这轮用户输入 text，
 // 判断这一轮请求应该走哪条处理路径，例如：
 // 1. 直接进入普通聊天 reply；
 // 2. 调用某个同步工具；
@@ -44,7 +44,8 @@ const MainVoiceHistoryKey = "main-voice"
 type IntentDecider interface {
 	// Decide 根据上下文和本轮输入做一次意图判定。
 	// ctx 用于限制判定时长并支持取消；
-	// history 是最近会话窗口；
+	// history 是当前给 intent 模型看的上下文；
+	// 它通常以最近会话窗口为主，必要时也可能已经在前面拼入一条长期记忆 system message；
 	// text 是本轮最终 ASR 文本。
 	Decide(ctx context.Context, history []llm.Message, text string) (llm.IntentDecision, error)
 }
@@ -278,7 +279,7 @@ func (s *Service) handleUserText(historyKey string, channel voice.Channel, text 
 	now := time.Now()
 	history := s.history.Snapshot(historyRef(historyKey), now)
 	memoryText := s.recallMemory(historyKey)
-	replyHistory := withMemoryMessage(history, memoryText)
+	modelHistory := withMemoryMessage(history, memoryText)
 	metrics := newTurnMetrics(now, text, len(history))
 
 	log.Printf("user text: %s", text)
@@ -307,13 +308,13 @@ func (s *Service) handleUserText(historyKey string, channel voice.Channel, text 
 		speculativeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		speculativeCancel = cancel
 		defer speculativeCancel()
-		speculative = startSpeculativeReply(speculativeCtx, s.reply, replyHistory, text)
+		speculative = startSpeculativeReply(speculativeCtx, s.reply, modelHistory, text)
 		log.Printf("speculative reply started")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	intentStartedAt := time.Now()
-	decision, err := s.intent.Decide(ctx, history, text)
+	decision, err := s.intent.Decide(ctx, modelHistory, text)
 	cancel()
 	log.Printf("intent completed: duration=%s", time.Since(intentStartedAt).Round(time.Millisecond))
 	if err != nil {
@@ -350,7 +351,7 @@ func (s *Service) handleUserText(historyKey string, channel voice.Channel, text 
 			if speculative != nil {
 				speculative.Cancel()
 			}
-			shouldDeliverResultReports = s.handleToolCall(historyKey, channel, history, replyHistory, memoryText, now, text, *decision.ToolCall, interrupted, decision.ShouldAbort, metrics)
+			shouldDeliverResultReports = s.handleToolCall(historyKey, channel, modelHistory, memoryText, now, text, *decision.ToolCall, interrupted, decision.ShouldAbort, metrics)
 			return
 		}
 	}
@@ -386,7 +387,7 @@ func (s *Service) handleUserText(historyKey string, channel voice.Channel, text 
 	} else {
 		ctx, cancel = context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
-		if err := s.reply.Stream(ctx, replyHistory, text, func(delta string) error {
+		if err := s.reply.Stream(ctx, modelHistory, text, func(delta string) error {
 			metrics.MarkOutputStart("reply")
 			replyText.WriteString(delta)
 			return player.Push(delta)
@@ -422,7 +423,7 @@ func (s *Service) handleUserText(historyKey string, channel voice.Channel, text 
 //     工具返回的文本可以直接播，不需要再过 reply 模型包装；
 //  3. 默认模式
 //     先拿到工具原始结果，再交给 reply 模型整理成更适合语音播报的话术后播放。
-func (s *Service) handleToolCall(historyKey string, channel voice.Channel, history []llm.Message, replyHistory []llm.Message, memoryText string, turnStartedAt time.Time, userText string, call llm.ToolCall, interrupted bool, shouldAbort bool, metrics *turnMetrics) bool {
+func (s *Service) handleToolCall(historyKey string, channel voice.Channel, modelHistory []llm.Message, memoryText string, turnStartedAt time.Time, userText string, call llm.ToolCall, interrupted bool, shouldAbort bool, metrics *turnMetrics) bool {
 	if s.tools == nil {
 		log.Printf("tool runner not configured: %s", call.Name)
 		return false
@@ -489,7 +490,7 @@ func (s *Service) handleToolCall(historyKey string, channel voice.Channel, histo
 	// 然后走流式播放器一边生成一边播报。
 	player := voice.NewStreamSpeaker(channel, 30*time.Second, 100*time.Millisecond)
 	var replyText strings.Builder
-	if err := s.reply.StreamToolResult(ctx, replyHistory, userText, call.Name, result.Text, func(delta string) error {
+	if err := s.reply.StreamToolResult(ctx, modelHistory, userText, call.Name, result.Text, func(delta string) error {
 		metrics.MarkOutputStart("tool_reply")
 		replyText.WriteString(delta)
 		return player.Push(delta)

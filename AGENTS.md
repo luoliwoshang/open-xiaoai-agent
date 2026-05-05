@@ -23,7 +23,7 @@
 - 执行 `intent` 路由，分流到工具 / 异步任务 / 任务继续等路径
 - 生成普通对话回复，以及工具结果总结回复
 - 通过现有 client 协议驱动设备侧本地 TTS 播放
-- 提供主流程长期记忆，并让 reply / complex_task 复用它
+- 提供主流程长期记忆，并让 intent / reply / complex_task 复用它
 - 维护轻量异步任务系统
 - 提供一期 IM 网关能力：支持微信文本投递，以及默认渠道的图片 / 文件调试发送
 - 持久化后端运行日志，并通过 dashboard API 暴露出来
@@ -339,6 +339,7 @@ Intent 阶段：
 - 非流式
 - 感知工具定义
 - 能看到最近会话历史
+- 会读取当前 historyKey 对应的长期记忆，并以 system message 形式参与路由判断
 - 能看到最近可继续的任务链摘要，最新节点可能是 `accepted / running / completed`，用于 `continue_task` 风格的路由
 
 Reply 阶段：
@@ -351,7 +352,7 @@ Reply 阶段：
 
 长期记忆行为：
 
-- intent 当前不读取长期记忆
+- intent 会把召回的长期记忆作为 system message 拼进上下文
 - reply 会把召回的长期记忆作为 system message 拼进上下文
 - 短期会话窗口超时结束后，会把那次完整 history 低频整理进长期记忆
 - `complex_task` / `continue_task` 会把这份长期记忆继续传给执行器
