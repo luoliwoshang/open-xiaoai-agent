@@ -2,7 +2,6 @@ package llm
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -16,13 +15,6 @@ type IntentDecision struct {
 	ReplyRequired bool   `json:"reply_required"`
 	Reason        string `json:"reason"`
 	ToolCall      *ToolCall
-}
-
-type intentJSONDecision struct {
-	ReplyRequired *bool           `json:"reply_required"`
-	Reason        string          `json:"reason"`
-	ToolName      string          `json:"tool_name"`
-	ToolArguments json.RawMessage `json:"tool_arguments"`
 }
 
 type IntentRecognizer struct {
@@ -66,9 +58,11 @@ func NewIntentRecognizer(client *Client, cfg config.ModelConfig, tools ToolDefin
 // 2. 是否应该命中某个同步工具；
 // 3. 是否应该受理为 complex_task / continue_task / query_task_progress 等特殊工具调用。
 //
-// 返回值兼容两种模型行为：
-// 1. 模型直接按 OpenAI tool call 机制返回工具调用；
-// 2. 模型没有稳定返回 tool call，而是退化成固定 JSON，由这里再还原成 IntentDecision。
+// 当前实现只接受模型返回的原生 tool call。
+//
+// 其中 continue_chat 也是一个正常注册进来的“路由工具”：
+// - intent 命中 continue_chat，表示后续继续走普通 reply 主线；
+// - intent 命中其它工具，则进入对应的 tool / async task 分支。
 //
 // assistant.Service 会消费这份 IntentDecision，
 // 决定主流程后续进入 reply、tool 还是 async task 分支。
@@ -93,67 +87,27 @@ func (r *IntentRecognizer) Decide(ctx context.Context, history []Message, text s
 	messages := buildIntentMessages(history, text, completedTasks)
 	logPreparedIntentRequest(r.config.Model, history, messages, availableTools)
 
-	// 这里把已注册工具定义一并传给模型：
-	// 如果模型稳定支持 OpenAI tool call，就可能直接返回某个 tool call；
-	// 否则会退化成普通文本 / JSON，再由下面的逻辑继续解析。
+	// 这里把已注册工具定义一并传给模型，要求模型直接返回原生 tool call。
 	result, err := r.client.CompleteWithTools(ctx, r.config, messages, 0, availableTools)
 	if err != nil {
 		return IntentDecision{}, err
 	}
 
-	if len(result.ToolCalls) > 0 {
-		call := result.ToolCalls[0]
-		log.Printf("intent tool selected via native tool_call: tool=%s", strings.TrimSpace(call.Name))
-		return IntentDecision{
-			ShouldHandle:  true,
-			ShouldAbort:   true,
-			ReplyRequired: false,
-			Reason:        fmt.Sprintf("tool call: %s", call.Name),
-			ToolCall:      &call,
-		}, nil
+	if len(result.ToolCalls) == 0 {
+		return IntentDecision{}, fmt.Errorf("intent response missing native tool call: content=%q", strings.TrimSpace(result.Content))
 	}
-
-	jsonText, err := extractJSONObject(result.Content)
-	if err != nil {
-		return IntentDecision{}, fmt.Errorf("extract intent json: %w", err)
+	if len(result.ToolCalls) > 1 {
+		log.Printf("intent returned multiple tool calls; only the first one will be used: count=%d", len(result.ToolCalls))
 	}
-
-	var decision IntentDecision
-	var raw intentJSONDecision
-	if err := json.Unmarshal([]byte(jsonText), &raw); err != nil {
-		return IntentDecision{}, fmt.Errorf("decode intent json: %w", err)
-	}
-
-	if raw.ReplyRequired == nil {
-		return IntentDecision{}, fmt.Errorf("decode intent json: reply_required is required")
-	}
-	decision = IntentDecision{
+	call := result.ToolCalls[0]
+	log.Printf("intent tool selected via native tool_call: tool=%s", strings.TrimSpace(call.Name))
+	return IntentDecision{
 		ShouldHandle:  true,
 		ShouldAbort:   true,
-		ReplyRequired: *raw.ReplyRequired,
-		Reason:        raw.Reason,
-	}
-
-	if toolName, ok := resolveToolName(raw.ToolName, raw.Reason, result.Content, availableTools); ok {
-		arguments := raw.ToolArguments
-		if len(arguments) == 0 {
-			arguments = json.RawMessage(`{}`)
-		}
-		log.Printf("intent tool selected via json fallback: tool=%s", strings.TrimSpace(toolName))
-		decision.ToolCall = &ToolCall{
-			Name:      toolName,
-			Arguments: arguments,
-		}
-		decision.ShouldHandle = true
-		decision.ShouldAbort = true
-		decision.ReplyRequired = false
-	}
-
-	if decision.ToolCall == nil && !decision.ReplyRequired {
-		return IntentDecision{}, fmt.Errorf("decode intent json: reply_required=false requires a tool call")
-	}
-
-	return decision, nil
+		ReplyRequired: false,
+		Reason:        fmt.Sprintf("tool call: %s", call.Name),
+		ToolCall:      &call,
+	}, nil
 }
 
 // buildIntentMessages 负责把这轮意图识别真正要发给模型的消息列表固定下来。
@@ -194,46 +148,28 @@ func buildIntentMessages(history []Message, text string, completedTasks string) 
 // 4. 如果摘要里给出了 latest_task_id，就必须用它，不要回退到更早任务。
 func buildIntentSystemPrompt() string {
 	return strings.TrimSpace(`
-你是一个小爱音箱外部接管器的工具路由器。你只能返回 JSON，不要返回任何额外文本。
+你是一个小爱音箱外部接管器的工具路由器。
 
 当前系统策略是：拿到 ASR 结果后，外部助手始终接管并负责回复，不再回退给原生小爱。
 
-你的任务只有两个：
-1. 如果用户请求明确命中了某个已注册工具，直接发起 tool call，而不是返回 JSON。
-2. 如果不命中工具，返回固定结构的 JSON，表示继续由外部大模型回复。
+你的任务只有一个：
+基于当前 ASR 文本和上下文，始终选择一个最合适的已注册工具，并直接返回原生 tool call。
 
-每次最多调用一个工具。
-
-如果当前模型没有可靠返回原生 tool call，也允许你退化为 JSON，并额外补两个字段：
-- "tool_name": 工具名
-- "tool_arguments": 工具参数对象
-只要需要调用工具，就必须提供这两个字段中的 tool_name，tool_arguments 没参数时返回 {}。
-
-返回 JSON，字段固定如下：
-{
-  "reply_required": true,
-  "reason": "简短原因",
-  "tool_name": "",
-  "tool_arguments": {}
-}
+不要输出普通文本，不要输出 JSON，不要解释原因。
+每次只能调用一个工具。
 
 规则：
-1. 如果明确命中已注册工具，直接调用工具，不要输出 JSON。
-2. 如果必须退化成 JSON 调工具，reply_required=false，并填写 tool_name/tool_arguments。
-3. 如果不调用工具，reply_required=true。
-4. reason 用一句短中文说明为什么调用工具，或者为什么不调用工具，改由主回复模型回答。
-5. 如果不调用工具，输出必须是合法 JSON。
-6. 当用户只是普通聊天、解释、建议、总结、延伸问答，不需要任何外部取数或执行动作时，优先调用 continue_chat。
-7. 如果用户输入混乱、断裂、像 ASR 纠错残片、语义不完整，或者当前信息不足以稳定判断具体工具、任务对象或参数，也优先调用 continue_chat，让主回复模型先请用户澄清、重说或补充，不要误调用其它工具。
-8. 工具只负责取数或执行明确动作，不负责基于已有上下文做建议、解释或延伸聊天。
-9. 如果用户明确要求你在当前电脑上实际做事，例如创建文件、修改文件、整理桌面、生成网页、写文档、执行命令、完成一个需要落地产出的多步骤任务，优先调用 complex_task，而不是直接走普通聊天回复。
-10. 如果用户是在要求你代为执行一个泛化的现实任务，而当前没有更专门的已注册工具，但你可以尝试借助长期记忆、联网服务、家庭自动化系统、网页后台或其它可操作环境去完成，也优先调用 complex_task。例如“打开家里的灯”“把客厅灯关掉”“帮我开一下家里的空调”“去 Home Assistant 里把某个设备打开”。
-11. 对“操作电脑”“帮我在桌面放一个文件”“帮我做个网页并保存下来”“帮我整理一个文档”这类请求，只要需要本机执行和产出物，就优先视为 complex_task。
-12. 如果用户是在补充、修改、继续刚才那条任务链，不管那条任务现在是执行中还是已经完成，例如“刚刚那个网页再加一个按钮”“把上次那个文件改一下”“在刚才那个任务基础上继续做”，优先调用 continue_task。
-13. 任务链摘要已经按时间整理出：初始任务需求、中间轮次对话、任务最后回答；每条摘要里的最新节点可能是执行中，也可能是已完成。判断 continue_task 时，要结合整段摘要一起理解，不要只看某一句。
-14. 调用 continue_task 时，只需要提供 task_id 和 request 两个字段。
-15. 如果任务链摘要里给出了 latest_task_id，那么 task_id 必须填写对应摘要里的 latest_task_id，不要编造，也不要回退到更早的任务 ID。
-16. 如果用户这次更像是在追一个仍在执行中的任务状态，而不是继续补充那条任务链的新要求，不要调用 continue_task，优先考虑 query_task_progress。
+1. 当用户只是普通聊天、解释、建议、总结、延伸问答，不需要任何外部取数或执行动作时，优先调用 continue_chat。
+2. 如果用户输入混乱、断裂、像 ASR 纠错残片、语义不完整，或者当前信息不足以稳定判断具体工具、任务对象或参数，也优先调用 continue_chat，让主回复模型先请用户澄清、重说或补充，不要误调用其它工具。
+3. 工具只负责取数或执行明确动作，不负责基于已有上下文做建议、解释或延伸聊天。
+4. 如果用户明确要求你在当前电脑上实际做事，例如创建文件、修改文件、整理桌面、生成网页、写文档、执行命令、完成一个需要落地产出的多步骤任务，优先调用 complex_task，而不是 continue_chat。
+5. 如果用户是在要求你代为执行一个泛化的现实任务，而当前没有更专门的已注册工具，但你可以尝试借助长期记忆、联网服务、家庭自动化系统、网页后台或其它可操作环境去完成，也优先调用 complex_task。例如“打开家里的灯”“把客厅灯关掉”“帮我开一下家里的空调”“去 Home Assistant 里把某个设备打开”。
+6. 对“操作电脑”“帮我在桌面放一个文件”“帮我做个网页并保存下来”“帮我整理一个文档”这类请求，只要需要本机执行和产出物，就优先视为 complex_task。
+7. 如果用户是在补充、修改、继续刚才那条任务链，不管那条任务现在是执行中还是已经完成，例如“刚刚那个网页再加一个按钮”“把上次那个文件改一下”“在刚才那个任务基础上继续做”，优先调用 continue_task。
+8. 任务链摘要已经按时间整理出：初始任务需求、中间轮次对话、任务最后回答；每条摘要里的最新节点可能是执行中，也可能是已完成。判断 continue_task 时，要结合整段摘要一起理解，不要只看某一句。
+9. 调用 continue_task 时，只需要提供 task_id 和 request 两个字段。
+10. 如果任务链摘要里给出了 latest_task_id，那么 task_id 必须填写对应摘要里的 latest_task_id，不要编造，也不要回退到更早的任务 ID。
+11. 如果用户这次更像是在追一个仍在执行中的任务状态，而不是继续补充那条任务链的新要求，不要调用 continue_task，优先考虑 query_task_progress。
 `)
 }
 
@@ -258,78 +194,4 @@ func logPreparedIntentRequest(model string, history []Message, messages []Messag
 			strings.TrimSpace(message.Content),
 		)
 	}
-}
-
-func resolveToolName(explicitName string, reason string, content string, tools []ToolDefinition) (string, bool) {
-	explicitName = strings.TrimSpace(explicitName)
-	if explicitName != "" {
-		for _, tool := range tools {
-			if explicitName == tool.Name {
-				return explicitName, true
-			}
-		}
-	}
-
-	searchSpace := reason + "\n" + content
-	matched := ""
-	for _, tool := range tools {
-		if tool.Name == "" {
-			continue
-		}
-		if strings.Contains(searchSpace, tool.Name) {
-			if matched != "" && matched != tool.Name {
-				return "", false
-			}
-			matched = tool.Name
-		}
-	}
-	if matched != "" {
-		return matched, true
-	}
-
-	return "", false
-}
-
-func extractJSONObject(text string) (string, error) {
-	start := strings.IndexByte(text, '{')
-	if start == -1 {
-		return "", fmt.Errorf("no json object found")
-	}
-
-	depth := 0
-	inString := false
-	escaped := false
-
-	for i := start; i < len(text); i++ {
-		ch := text[i]
-
-		if inString {
-			if escaped {
-				escaped = false
-				continue
-			}
-			if ch == '\\' {
-				escaped = true
-				continue
-			}
-			if ch == '"' {
-				inString = false
-			}
-			continue
-		}
-
-		switch ch {
-		case '"':
-			inString = true
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				return text[start : i+1], nil
-			}
-		}
-	}
-
-	return "", fmt.Errorf("unterminated json object")
 }

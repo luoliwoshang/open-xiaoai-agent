@@ -158,6 +158,12 @@ func buildSDKProbeMessages(text string) []openai.ChatCompletionMessageParamUnion
 
 当前系统策略是：拿到 ASR 结果后，外部助手始终接管并负责回复，不再回退给原生小爱。
 
+你的任务只有一个：
+基于当前 ASR 文本和上下文，始终选择一个最合适的已注册工具，并直接返回原生 tool call。
+
+不要输出普通文本，不要输出 JSON，不要解释原因。
+每次只能调用一个工具。
+
 规则：
 1. 当用户只是普通聊天、解释、建议、总结、延伸问答、不需要任何外部动作或取数时，调用 continue_chat。
 2. 如果用户输入混乱、断裂、像 ASR 纠错残片、语义不完整，或者当前信息不足以稳定判断具体工具、任务对象或参数，也调用 continue_chat，让主回复模型先请用户澄清、重说或补充。

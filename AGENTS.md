@@ -343,9 +343,11 @@ Intent 阶段：
 
 - 非流式
 - 感知工具定义
+- 当前只接受模型返回的原生 tool call，不再兼容 JSON fallback
 - 能看到最近会话历史
 - 会读取当前 historyKey 对应的长期记忆，并以 system message 形式参与路由判断
 - 能看到最近可继续的任务链摘要，最新节点可能是 `accepted / running / completed`，用于 `continue_task` 风格的路由
+- 普通聊天、澄清输入这类“不需要外部动作”的路径，也会先命中 `continue_chat` 这个路由工具，再回到 reply 主线
 
 Reply 阶段：
 
