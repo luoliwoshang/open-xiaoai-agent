@@ -158,6 +158,7 @@ go run .
 - `SOUL.md`
   - 常见的人设文件命名约定之一
   - 当前不会自动读取它，只有 `config.yaml` 里的 `soul_path` 显式指向它时才会加载
+  - 这类人设文件按当前约定应保留在本地，不再提交到仓库
 - `config.example.yaml`
   - 提交到仓库中的示例配置
 - `config.yaml`
@@ -178,6 +179,7 @@ go run .
 重要说明：
 
 - `config.yaml` 故意被忽略
+- `SOUL.md` 这类本地人设文件也应忽略，不要提交
 - 不要提交真实 API key
 - `soul_path` 是必填项，支持相对路径和绝对路径；相对路径按仓库根目录解析
 - 运行时数据库配置只从 `config.yaml` 的 `database.dsn` 读取
