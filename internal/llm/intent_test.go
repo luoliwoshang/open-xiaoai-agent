@@ -42,8 +42,6 @@ func TestBuildIntentSystemPrompt(t *testing.T) {
 
 返回 JSON，字段固定如下：
 {
-  "should_handle": true,
-  "should_abort": true,
   "reply_required": true,
   "reason": "简短原因",
   "tool_name": "",
@@ -52,25 +50,21 @@ func TestBuildIntentSystemPrompt(t *testing.T) {
 
 规则：
 1. 如果明确命中已注册工具，直接调用工具，不要输出 JSON。
-2. 如果必须退化成 JSON 调工具，should_handle=true，should_abort=true，reply_required=false，并填写 tool_name/tool_arguments。
-3. 如果不调用工具，should_handle=true，should_abort=true，reply_required=true。
+2. 如果必须退化成 JSON 调工具，reply_required=false，并填写 tool_name/tool_arguments。
+3. 如果不调用工具，reply_required=true。
 4. reason 用一句短中文说明为什么调用工具，或者为什么不调用工具，改由主回复模型回答。
 5. 如果不调用工具，输出必须是合法 JSON。
 6. 当用户只是普通聊天、解释、建议、总结、延伸问答，不需要任何外部取数或执行动作时，优先调用 continue_chat。
 7. 如果用户输入混乱、断裂、像 ASR 纠错残片、语义不完整，或者当前信息不足以稳定判断具体工具、任务对象或参数，也优先调用 continue_chat，让主回复模型先请用户澄清、重说或补充，不要误调用其它工具。
 8. 工具只负责取数或执行明确动作，不负责基于已有上下文做建议、解释或延伸聊天。
-9. 对天气工具尤其要严格区分：
-   - 如果用户明确要求查询、确认、刷新某个城市/地区的天气，才调用天气工具。
-   - 如果用户是在已有天气结果基础上继续追问“那穿什么衣服”“要不要带伞”“适不适合出门”“那我该注意什么”这类建议问题，不要调用天气工具，直接走主回复模型。
-10. 如果当前问题没有提供新的城市/地区信息，而且从上下文看已经拿到天气结果，优先认为这是延伸问答，不要重复调用天气工具。
-11. 如果用户明确要求你在当前电脑上实际做事，例如创建文件、修改文件、整理桌面、生成网页、写文档、执行命令、完成一个需要落地产出的多步骤任务，优先调用 complex_task，而不是直接走普通聊天回复。
-12. 如果用户是在要求你代为执行一个泛化的现实任务，而当前没有更专门的已注册工具，但你可以尝试借助长期记忆、联网服务、家庭自动化系统、网页后台或其它可操作环境去完成，也优先调用 complex_task。例如“打开家里的灯”“把客厅灯关掉”“帮我开一下家里的空调”“去 Home Assistant 里把某个设备打开”。
-13. 对“操作电脑”“帮我在桌面放一个文件”“帮我做个网页并保存下来”“帮我整理一个文档”这类请求，只要需要本机执行和产出物，就优先视为 complex_task。
-14. 如果用户是在补充、修改、继续刚才那条任务链，不管那条任务现在是执行中还是已经完成，例如“刚刚那个网页再加一个按钮”“把上次那个文件改一下”“在刚才那个任务基础上继续做”，优先调用 continue_task。
-15. 任务链摘要已经按时间整理出：初始任务需求、中间轮次对话、任务最后回答；每条摘要里的最新节点可能是执行中，也可能是已完成。判断 continue_task 时，要结合整段摘要一起理解，不要只看某一句。
-16. 调用 continue_task 时，只需要提供 task_id 和 request 两个字段。
-17. 如果任务链摘要里给出了 latest_task_id，那么 task_id 必须填写对应摘要里的 latest_task_id，不要编造，也不要回退到更早的任务 ID。
-18. 如果用户这次更像是在追一个仍在执行中的任务状态，而不是继续补充那条任务链的新要求，不要调用 continue_task，优先考虑 query_task_progress。
+9. 如果用户明确要求你在当前电脑上实际做事，例如创建文件、修改文件、整理桌面、生成网页、写文档、执行命令、完成一个需要落地产出的多步骤任务，优先调用 complex_task，而不是直接走普通聊天回复。
+10. 如果用户是在要求你代为执行一个泛化的现实任务，而当前没有更专门的已注册工具，但你可以尝试借助长期记忆、联网服务、家庭自动化系统、网页后台或其它可操作环境去完成，也优先调用 complex_task。例如“打开家里的灯”“把客厅灯关掉”“帮我开一下家里的空调”“去 Home Assistant 里把某个设备打开”。
+11. 对“操作电脑”“帮我在桌面放一个文件”“帮我做个网页并保存下来”“帮我整理一个文档”这类请求，只要需要本机执行和产出物，就优先视为 complex_task。
+12. 如果用户是在补充、修改、继续刚才那条任务链，不管那条任务现在是执行中还是已经完成，例如“刚刚那个网页再加一个按钮”“把上次那个文件改一下”“在刚才那个任务基础上继续做”，优先调用 continue_task。
+13. 任务链摘要已经按时间整理出：初始任务需求、中间轮次对话、任务最后回答；每条摘要里的最新节点可能是执行中，也可能是已完成。判断 continue_task 时，要结合整段摘要一起理解，不要只看某一句。
+14. 调用 continue_task 时，只需要提供 task_id 和 request 两个字段。
+15. 如果任务链摘要里给出了 latest_task_id，那么 task_id 必须填写对应摘要里的 latest_task_id，不要编造，也不要回退到更早的任务 ID。
+16. 如果用户这次更像是在追一个仍在执行中的任务状态，而不是继续补充那条任务链的新要求，不要调用 continue_task，优先考虑 query_task_progress。
 `)
 
 	if got != want {
@@ -125,7 +119,7 @@ func TestIntentRecognizerDecide(t *testing.T) {
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"choices":[{"message":{"content":"{\"should_handle\":true,\"should_abort\":true,\"reply_required\":true,\"reason\":\"开放式问答\"}"}}]}`)
+			fmt.Fprint(w, `{"choices":[{"message":{"content":"{\"reply_required\":true,\"reason\":\"开放式问答\"}"}}]}`)
 		}))
 		defer server.Close()
 
@@ -149,7 +143,7 @@ func TestIntentRecognizerDecide(t *testing.T) {
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"choices":[{"message":{"content":"结果如下：\n{\"should_handle\":false,\"should_abort\":false,\"reply_required\":false,\"reason\":\"原生设备控制\"}"}}]}`)
+			fmt.Fprint(w, `{"choices":[{"message":{"content":"结果如下：\n{\"reply_required\":true,\"reason\":\"开放式问答\"}"}}]}`)
 		}))
 		defer server.Close()
 
@@ -163,8 +157,8 @@ func TestIntentRecognizerDecide(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Decide() error = %v", err)
 		}
-		if decision.ShouldHandle {
-			t.Fatalf("decision = %+v, want should_handle=false", decision)
+		if !decision.ShouldHandle || !decision.ShouldAbort || !decision.ReplyRequired {
+			t.Fatalf("decision = %+v, want handle+abort+reply", decision)
 		}
 	})
 
@@ -249,7 +243,7 @@ func TestIntentRecognizerDecide(t *testing.T) {
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"choices":[{"message":{"content":"{\"should_handle\":true,\"should_abort\":true,\"reply_required\":false,\"reason\":\"用户询问功能列表，需要调用工具\",\"tool_name\":\"list_tools\",\"tool_arguments\":{}}"}}]}`)
+			fmt.Fprint(w, `{"choices":[{"message":{"content":"{\"reply_required\":false,\"reason\":\"用户询问功能列表，需要调用工具\",\"tool_name\":\"list_tools\",\"tool_arguments\":{}}"}}]}`)
 		}))
 		defer server.Close()
 
@@ -287,7 +281,7 @@ func TestIntentRecognizerDecide(t *testing.T) {
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"choices":[{"message":{"content":"{\"should_handle\":true,\"should_abort\":true,\"reply_required\":true,\"reason\":\"用户询问功能列表，需要调用 list_tools 工具\"}"}}]}`)
+			fmt.Fprint(w, `{"choices":[{"message":{"content":"{\"reply_required\":true,\"reason\":\"用户询问功能列表，需要调用 list_tools 工具\"}"}}]}`)
 		}))
 		defer server.Close()
 
@@ -317,6 +311,54 @@ func TestIntentRecognizerDecide(t *testing.T) {
 		}
 		if decision.ReplyRequired {
 			t.Fatalf("decision.ReplyRequired = true, want false")
+		}
+	})
+
+	t.Run("rejects json without reply_required", func(t *testing.T) {
+		t.Parallel()
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"choices":[{"message":{"content":"{\"reason\":\"开放式问答\"}"}}]}`)
+		}))
+		defer server.Close()
+
+		recognizer := NewIntentRecognizer(NewClient(), config.ModelConfig{
+			Model:   "intent-model",
+			BaseURL: server.URL,
+			APIKey:  "test-key",
+		}, nil, nil)
+
+		_, err := recognizer.Decide(context.Background(), nil, "解释一下量子纠缠")
+		if err == nil {
+			t.Fatal("Decide() error = nil, want non-nil")
+		}
+		if !strings.Contains(err.Error(), "reply_required is required") {
+			t.Fatalf("Decide() error = %v, want reply_required is required", err)
+		}
+	})
+
+	t.Run("rejects reply_required false without tool", func(t *testing.T) {
+		t.Parallel()
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"choices":[{"message":{"content":"{\"reply_required\":false,\"reason\":\"工具调用失败\"}"}}]}`)
+		}))
+		defer server.Close()
+
+		recognizer := NewIntentRecognizer(NewClient(), config.ModelConfig{
+			Model:   "intent-model",
+			BaseURL: server.URL,
+			APIKey:  "test-key",
+		}, nil, nil)
+
+		_, err := recognizer.Decide(context.Background(), nil, "解释一下量子纠缠")
+		if err == nil {
+			t.Fatal("Decide() error = nil, want non-nil")
+		}
+		if !strings.Contains(err.Error(), "reply_required=false requires a tool call") {
+			t.Fatalf("Decide() error = %v, want reply_required=false requires a tool call", err)
 		}
 	})
 }
