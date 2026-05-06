@@ -59,6 +59,7 @@ type Server struct {
 		RuntimeStatus() assistant.RuntimeStatus
 		ResetConversationData() error
 		SubmitRecognizedText(text string) error
+		NotifyDefaultArtifactDeliveryChannelReady()
 	}
 	xiaoai interface {
 		ConnectionStatus() agentserver.ConnectionStatus
@@ -98,6 +99,7 @@ func New(addr string, tasks *tasks.Manager, claude *complextask.Service, convers
 	RuntimeStatus() assistant.RuntimeStatus
 	ResetConversationData() error
 	SubmitRecognizedText(text string) error
+	NotifyDefaultArtifactDeliveryChannelReady()
 }, xiaoaiStatus interface {
 	ConnectionStatus() agentserver.ConnectionStatus
 }, runtimeSettings interface {
@@ -655,6 +657,9 @@ func (s *Server) handleIMDeliverySettings(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+	if payload.Enabled && s.conversations != nil {
+		s.conversations.NotifyDefaultArtifactDeliveryChannelReady()
 	}
 
 	writeJSON(w, map[string]any{

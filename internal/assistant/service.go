@@ -63,6 +63,7 @@ type ToolRunner interface {
 type TaskManager interface {
 	Submit(spec plugin.AsyncTask) (tasks.Task, error)
 	ListPendingResultReports(limit int) ([]tasks.ResultReportItem, []string)
+	ListPendingArtifactRedeliveryCandidates(limit int) ([]tasks.ResultReportItem, []string)
 	ListTaskArtifactDeliveries(taskIDs []string) []tasks.ArtifactDeliveryItem
 	MarkArtifactDeliveriesNoChannel(ids []string) error
 	MarkArtifactDeliveryDelivered(deliveryID string, accountID string, targetID string, channelLabel string, providerMessageID string) error
@@ -111,19 +112,21 @@ type Service struct {
 
 	sessionExpiryCancel context.CancelFunc
 
-	runtimeMu         sync.Mutex
-	busy              bool
-	lastHistoryKey    string
-	lastChannel       voice.Channel
-	resultReportReady bool
+	runtimeMu                     sync.Mutex
+	busy                          bool
+	lastHistoryKey                string
+	lastChannel                   voice.Channel
+	resultReportReady             bool
+	historicalArtifactReportReady bool
 }
 
 // RuntimeStatus 是主语音通道的只读运行时快照。
 //
 // 这份状态主要给 dashboard 和排障使用，用来回答：
-// 1. 当前是否还有一轮会发声的主流程正在执行；
-// 2. 当前是否有任务结果已经 ready，但因为语音通道忙而暂时还没做结果汇报；
-// 3. 当前是否已经拿到一个可用于主动播报的最近语音通道。
+//  1. 当前是否还有一轮会发声的主流程正在执行；
+//  2. 当前是否已有“待主动通知用户的任务动态”已经 ready，
+//     包括新的任务结果汇报，以及历史产物补投递通知；
+//  3. 当前是否已经拿到一个可用于主动播报的最近语音通道。
 type RuntimeStatus struct {
 	Busy              bool `json:"busy"`
 	ResultReportReady bool `json:"result_report_ready"`
@@ -189,7 +192,7 @@ func (s *Service) RuntimeStatus() RuntimeStatus {
 
 	return RuntimeStatus{
 		Busy:              s.busy,
-		ResultReportReady: s.resultReportReady,
+		ResultReportReady: s.resultReportReady || s.historicalArtifactReportReady,
 		HasVoiceChannel:   s.lastChannel != nil,
 	}
 }
@@ -245,15 +248,40 @@ func (s *Service) SubmitRecognizedText(text string) error {
 // TryDeliverTaskResultReports 在任务系统通知“有待汇报结果”时被调用。
 // 如果当前语音通道空闲，就主动做任务结果汇报；如果当前仍在处理别的语音主流程，就先挂起，等本轮结束后再汇报。
 func (s *Service) TryDeliverTaskResultReports() {
-	historyKey, channel, ok := s.tryBeginResultReportTurn()
+	historyKey, channel, includeHistorical, ok := s.tryBeginResultReportTurn()
 	if !ok {
 		return
 	}
 
 	go func() {
 		defer s.finishVoiceTurn()
-		s.deliverTaskResultReports(historyKey, channel)
+		s.deliverTaskResultReports(historyKey, channel, includeHistorical)
 	}()
+}
+
+// NotifyDefaultArtifactDeliveryChannelReady 在“默认任务产物通知渠道刚刚可用”时被调用。
+//
+// 这条路径有两个目标：
+// 1. 如果当前有最近一次可复用的语音通道，就把“历史产物补投递通知”也走 reply model 润色后播出来；
+// 2. 如果当前根本没有可用语音通道，也至少先把历史未送达产物静默补发掉。
+func (s *Service) NotifyDefaultArtifactDeliveryChannelReady() {
+	if s == nil || s.tasks == nil {
+		return
+	}
+
+	historyKey, channel, startNow, hasVoice := s.tryBeginHistoricalArtifactReportTurn()
+	if startNow {
+		go func() {
+			defer s.finishVoiceTurn()
+			s.deliverTaskResultReports(historyKey, channel, true)
+		}()
+		return
+	}
+	if hasVoice {
+		return
+	}
+
+	s.syncHistoricalArtifactDeliveriesWithoutVoice(3)
 }
 
 func (s *Service) handleUserText(historyKey string, channel voice.Channel, text string) {
@@ -273,7 +301,7 @@ func (s *Service) handleUserText(historyKey string, channel voice.Channel, text 
 		if !shouldDeliverResultReports {
 			return
 		}
-		s.deliverTaskResultReports(historyKey, channel)
+		s.deliverTaskResultReports(historyKey, channel, false)
 	}()
 
 	now := time.Now()
@@ -646,34 +674,65 @@ func (s *Service) tryBeginInjectedVoiceTurn() (string, voice.Channel, error) {
 	return s.mainHistoryKey, s.debugChannel, nil
 }
 
-func (s *Service) tryBeginResultReportTurn() (string, voice.Channel, bool) {
+func (s *Service) tryBeginResultReportTurn() (string, voice.Channel, bool, bool) {
 	s.runtimeMu.Lock()
 	defer s.runtimeMu.Unlock()
 
 	s.resultReportReady = true
 	if s.busy || s.lastChannel == nil || strings.TrimSpace(s.lastHistoryKey) == "" {
-		return "", nil, false
+		return "", nil, false, false
+	}
+
+	historyKey := s.lastHistoryKey
+	channel := s.lastChannel
+	includeHistorical := s.historicalArtifactReportReady
+	s.busy = true
+	s.resultReportReady = false
+	s.historicalArtifactReportReady = false
+	return historyKey, channel, includeHistorical, true
+}
+
+// tryBeginHistoricalArtifactReportTurn 只在“默认产物通知渠道刚刚可用”时使用。
+//
+// 和普通的 tryBeginResultReportTurn 不同，这里不会在“完全没有可用语音通道”时把状态挂起来；
+// 因为这条路径在没有语音通道时会退化成“先静默补发文件”，而不是强制等下一轮再播报。
+func (s *Service) tryBeginHistoricalArtifactReportTurn() (string, voice.Channel, bool, bool) {
+	s.runtimeMu.Lock()
+	defer s.runtimeMu.Unlock()
+
+	if s.lastChannel == nil || strings.TrimSpace(s.lastHistoryKey) == "" {
+		return "", nil, false, false
+	}
+
+	s.resultReportReady = true
+	s.historicalArtifactReportReady = true
+	if s.busy {
+		return "", nil, false, true
 	}
 
 	historyKey := s.lastHistoryKey
 	channel := s.lastChannel
 	s.busy = true
 	s.resultReportReady = false
-	return historyKey, channel, true
+	s.historicalArtifactReportReady = false
+	return historyKey, channel, true, true
 }
 
 func (s *Service) finishVoiceTurn() {
 	var historyKey string
 	var channel voice.Channel
 	startPending := false
+	includeHistorical := false
 
 	s.runtimeMu.Lock()
 	s.busy = false
-	if s.resultReportReady && s.lastChannel != nil && strings.TrimSpace(s.lastHistoryKey) != "" {
+	if (s.resultReportReady || s.historicalArtifactReportReady) && s.lastChannel != nil && strings.TrimSpace(s.lastHistoryKey) != "" {
 		historyKey = s.lastHistoryKey
 		channel = s.lastChannel
+		includeHistorical = s.historicalArtifactReportReady
 		s.busy = true
 		s.resultReportReady = false
+		s.historicalArtifactReportReady = false
 		startPending = true
 	}
 	s.runtimeMu.Unlock()
@@ -684,7 +743,7 @@ func (s *Service) finishVoiceTurn() {
 
 	go func() {
 		defer s.finishVoiceTurn()
-		s.deliverTaskResultReports(historyKey, channel)
+		s.deliverTaskResultReports(historyKey, channel, includeHistorical)
 	}()
 }
 
@@ -704,12 +763,58 @@ func (s *Service) preparePlayback(channel voice.Channel, interrupted bool, shoul
 	return true
 }
 
-func (s *Service) deliverTaskResultReports(historyKey string, channel voice.Channel) {
+type taskReportNoticeType string
+
+const (
+	taskReportNoticeResult             taskReportNoticeType = "task_result_report"
+	taskReportNoticeHistoricalDelivery taskReportNoticeType = "historical_artifact_redelivery"
+)
+
+type taskReportNotice struct {
+	Type taskReportNoticeType
+	Item tasks.ResultReportItem
+}
+
+type artifactDeliveryRoundOutcome string
+
+const (
+	artifactDeliveryOutcomeUnchanged artifactDeliveryRoundOutcome = "unchanged"
+	artifactDeliveryOutcomeDelivered artifactDeliveryRoundOutcome = "delivered_this_round"
+	artifactDeliveryOutcomeFailed    artifactDeliveryRoundOutcome = "failed_this_round"
+	artifactDeliveryOutcomeNoChannel artifactDeliveryRoundOutcome = "no_channel_this_round"
+)
+
+type artifactDeliverySyncItem struct {
+	Item    tasks.ArtifactDeliveryItem
+	Outcome artifactDeliveryRoundOutcome
+}
+
+func (s *Service) deliverTaskResultReports(historyKey string, channel voice.Channel, includeHistorical bool) {
 	if s.tasks == nil {
 		return
 	}
-	items, ids := s.tasks.ListPendingResultReports(3)
-	if len(items) == 0 || len(ids) == 0 {
+
+	resultItems, resultIDs := s.tasks.ListPendingResultReports(3)
+
+	notices := make([]taskReportNotice, 0, len(resultItems)+3)
+	for _, item := range resultItems {
+		notices = append(notices, taskReportNotice{
+			Type: taskReportNoticeResult,
+			Item: item,
+		})
+	}
+
+	if includeHistorical {
+		historicalItems, _ := s.tasks.ListPendingArtifactRedeliveryCandidates(3)
+		for _, item := range historicalItems {
+			notices = append(notices, taskReportNotice{
+				Type: taskReportNoticeHistoricalDelivery,
+				Item: item,
+			})
+		}
+	}
+
+	if len(notices) == 0 {
 		return
 	}
 
@@ -717,8 +822,17 @@ func (s *Service) deliverTaskResultReports(historyKey string, channel voice.Chan
 	// 如果这些任务还带了产物，这里会先尝试把产物发到当前默认 IM 渠道，
 	// 再把“产物已经发到微信了”或“当前没有可用渠道发送产物”这类结果
 	// 一并带进后面的结果汇报 prompt。
-	deliveries := s.syncTaskArtifactDeliveriesBeforeReport(ids)
-	reportContext := buildTaskResultReportContext(items, deliveries)
+	taskIDs := collectTaskReportNoticeIDs(notices)
+	deliveries := s.syncTaskArtifactDeliveriesBeforeReport(taskIDs)
+	notices = filterTaskReportNotices(notices, deliveries)
+	if len(notices) == 0 {
+		return
+	}
+
+	reportContext := buildTaskResultReportContext(notices, deliveries)
+	if reportContext == "" {
+		return
+	}
 	history := s.history.Snapshot(historyRef(historyKey), time.Now())
 	replyHistory := withMemoryMessage(history, s.recallMemory(historyKey))
 
@@ -747,19 +861,50 @@ func (s *Service) deliverTaskResultReports(historyKey string, channel voice.Chan
 
 	s.appendConversationTurn(historyKey, time.Now(), "task_result_report", llm.Message{Role: "assistant", Content: finalReply})
 	s.mirrorReply(finalReply)
-	if err := s.tasks.MarkResultReported(ids); err != nil {
-		log.Printf("mark task result report failed: %v", err)
+	if len(resultIDs) > 0 {
+		if err := s.tasks.MarkResultReported(resultIDs); err != nil {
+			log.Printf("mark task result report failed: %v", err)
+		}
 	}
+}
+
+func (s *Service) syncHistoricalArtifactDeliveriesWithoutVoice(limit int) {
+	if s == nil || s.tasks == nil {
+		return
+	}
+
+	resultItems, resultIDs := s.tasks.ListPendingResultReports(limit)
+	historicalItems, historicalIDs := s.tasks.ListPendingArtifactRedeliveryCandidates(limit)
+	taskIDs := append(append([]string(nil), resultIDs...), historicalIDs...)
+	taskIDs = uniqueStrings(taskIDs)
+	if len(taskIDs) == 0 {
+		return
+	}
+	deliveries := s.syncTaskArtifactDeliveriesBeforeReport(taskIDs)
+	deliveredNow, failedNow, noChannelNow := countRoundDeliveryOutcomes(deliveries)
+	log.Printf(
+		"artifact delivery sync completed without voice: result_tasks=%d historical_tasks=%d delivered_now=%d failed_now=%d no_channel_now=%d",
+		len(resultItems),
+		len(historicalItems),
+		deliveredNow,
+		failedNow,
+		noChannelNow,
+	)
 }
 
 // syncTaskArtifactDeliveriesBeforeReport 会在真正生成语音结果汇报前，
 // 先把这些任务下尚未完成的产物交付状态尽量推进到最新。
 //
-// 当前实现有三种结果：
-// 1. 没有产物 => 直接跳过；
-// 2. 有产物但没有默认 IM 渠道 => 记成 no_channel；
-// 3. 有产物也有默认 IM 渠道 => 逐个尝试发送，并把成功 / 失败写回交付记录。
-func (s *Service) syncTaskArtifactDeliveriesBeforeReport(taskIDs []string) []tasks.ArtifactDeliveryItem {
+// 除了返回最终状态，这里还会保留“本轮刚刚发生了什么”：
+// - delivered_this_round
+// - failed_this_round
+// - no_channel_this_round
+//
+// 这样 reply model 才能区分：
+// - “这个文件早就发过了”
+// - “这个文件是刚刚重新补发成功的”
+// - “这次重新尝试发送，但还是失败了”
+func (s *Service) syncTaskArtifactDeliveriesBeforeReport(taskIDs []string) []artifactDeliverySyncItem {
 	if s.tasks == nil {
 		return nil
 	}
@@ -769,30 +914,37 @@ func (s *Service) syncTaskArtifactDeliveriesBeforeReport(taskIDs []string) []tas
 		return nil
 	}
 
+	outcomes := make(map[string]artifactDeliveryRoundOutcome, len(deliveries))
 	pendingIDs := pendingArtifactDeliveryIDs(deliveries)
 	if len(pendingIDs) == 0 {
-		return deliveries
+		return buildArtifactDeliverySyncItems(deliveries, outcomes)
 	}
 
 	if s.artifactDeliverer == nil {
 		if err := s.tasks.MarkArtifactDeliveriesNoChannel(pendingIDs); err != nil {
 			log.Printf("mark artifact deliveries without channel failed: %v", err)
-			return deliveries
+			return buildArtifactDeliverySyncItems(deliveries, outcomes)
 		}
-		return s.tasks.ListTaskArtifactDeliveries(taskIDs)
+		for _, id := range pendingIDs {
+			outcomes[id] = artifactDeliveryOutcomeNoChannel
+		}
+		return buildArtifactDeliverySyncItems(s.tasks.ListTaskArtifactDeliveries(taskIDs), outcomes)
 	}
 
 	accountID, targetID, channelLabel, ok, err := s.artifactDeliverer.ResolveDefaultTaskArtifactDelivery()
 	if err != nil {
 		log.Printf("resolve default artifact delivery channel failed: %v", err)
-		return deliveries
+		return buildArtifactDeliverySyncItems(deliveries, outcomes)
 	}
 	if !ok {
 		if err := s.tasks.MarkArtifactDeliveriesNoChannel(pendingIDs); err != nil {
 			log.Printf("mark artifact deliveries without channel failed: %v", err)
-			return deliveries
+			return buildArtifactDeliverySyncItems(deliveries, outcomes)
 		}
-		return s.tasks.ListTaskArtifactDeliveries(taskIDs)
+		for _, id := range pendingIDs {
+			outcomes[id] = artifactDeliveryOutcomeNoChannel
+		}
+		return buildArtifactDeliverySyncItems(s.tasks.ListTaskArtifactDeliveries(taskIDs), outcomes)
 	}
 
 	for _, item := range deliveries {
@@ -805,14 +957,79 @@ func (s *Service) syncTaskArtifactDeliveriesBeforeReport(taskIDs []string) []tas
 			if markErr := s.tasks.MarkArtifactDeliveryFailed(item.Delivery.ID, accountID, targetID, channelLabel, err.Error()); markErr != nil {
 				log.Printf("mark artifact delivery failed state failed: delivery=%s err=%v", item.Delivery.ID, markErr)
 			}
+			outcomes[item.Delivery.ID] = artifactDeliveryOutcomeFailed
 			continue
 		}
 		if err := s.tasks.MarkArtifactDeliveryDelivered(item.Delivery.ID, accountID, targetID, channelLabel, messageID); err != nil {
 			log.Printf("mark artifact delivery succeeded state failed: delivery=%s err=%v", item.Delivery.ID, err)
 		}
+		outcomes[item.Delivery.ID] = artifactDeliveryOutcomeDelivered
 	}
 
-	return s.tasks.ListTaskArtifactDeliveries(taskIDs)
+	return buildArtifactDeliverySyncItems(s.tasks.ListTaskArtifactDeliveries(taskIDs), outcomes)
+}
+
+func buildArtifactDeliverySyncItems(items []tasks.ArtifactDeliveryItem, outcomes map[string]artifactDeliveryRoundOutcome) []artifactDeliverySyncItem {
+	synced := make([]artifactDeliverySyncItem, 0, len(items))
+	for _, item := range items {
+		outcome := outcomes[item.Delivery.ID]
+		if outcome == "" {
+			outcome = artifactDeliveryOutcomeUnchanged
+		}
+		synced = append(synced, artifactDeliverySyncItem{
+			Item:    item,
+			Outcome: outcome,
+		})
+	}
+	return synced
+}
+
+func collectTaskReportNoticeIDs(notices []taskReportNotice) []string {
+	ids := make([]string, 0, len(notices))
+	for _, notice := range notices {
+		ids = append(ids, notice.Item.ID)
+	}
+	return uniqueStrings(ids)
+}
+
+func countRoundDeliveryOutcomes(items []artifactDeliverySyncItem) (deliveredNow int, failedNow int, noChannelNow int) {
+	for _, item := range items {
+		switch item.Outcome {
+		case artifactDeliveryOutcomeDelivered:
+			deliveredNow++
+		case artifactDeliveryOutcomeFailed:
+			failedNow++
+		case artifactDeliveryOutcomeNoChannel:
+			noChannelNow++
+		}
+	}
+	return deliveredNow, failedNow, noChannelNow
+}
+
+func filterTaskReportNotices(notices []taskReportNotice, deliveries []artifactDeliverySyncItem) []taskReportNotice {
+	deliveriesByTaskID := groupArtifactDeliveriesByTaskID(deliveries)
+	filtered := make([]taskReportNotice, 0, len(notices))
+	for _, notice := range notices {
+		if notice.Type != taskReportNoticeHistoricalDelivery {
+			filtered = append(filtered, notice)
+			continue
+		}
+		if !hasHistoricalRedeliveryChanges(deliveriesByTaskID[notice.Item.ID]) {
+			continue
+		}
+		filtered = append(filtered, notice)
+	}
+	return filtered
+}
+
+func hasHistoricalRedeliveryChanges(items []artifactDeliverySyncItem) bool {
+	for _, item := range items {
+		switch item.Outcome {
+		case artifactDeliveryOutcomeDelivered, artifactDeliveryOutcomeFailed, artifactDeliveryOutcomeNoChannel:
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) mirrorReply(text string) {
@@ -826,20 +1043,24 @@ func (s *Service) mirrorReply(text string) {
 	s.mirror.MirrorText(text)
 }
 
-func buildTaskResultReportContext(items []tasks.ResultReportItem, deliveries []tasks.ArtifactDeliveryItem) string {
+func buildTaskResultReportContext(items []taskReportNotice, deliveries []artifactDeliverySyncItem) string {
 	var b strings.Builder
 	deliveriesByTaskID := groupArtifactDeliveriesByTaskID(deliveries)
-	b.WriteString("最近有异步任务结果需要主动汇报，任务信息如下：\n")
+	b.WriteString("最近有需要主动通知用户的任务动态，结构化信息如下：\n")
 	for index, item := range items {
-		fmt.Fprintf(&b, "%d. 标题：%s\n", index+1, fallbackTaskNoticeValue(item.Title, "未命名任务"))
-		fmt.Fprintf(&b, "   状态：%s\n", taskNoticeStateLabel(item.State))
-		if summary := strings.TrimSpace(item.Summary); summary != "" {
+		fmt.Fprintf(&b, "%d. 通知类型：%s\n", index+1, taskReportNoticeTypeLabel(item.Type))
+		if item.Type == taskReportNoticeHistoricalDelivery {
+			fmt.Fprintf(&b, "   说明：这不是新的任务完成通知，重点告诉用户之前没送达的产物这次是否已经重新投递。\n")
+		}
+		fmt.Fprintf(&b, "   标题：%s\n", fallbackTaskNoticeValue(item.Item.Title, "未命名任务"))
+		fmt.Fprintf(&b, "   状态：%s\n", taskNoticeStateLabel(item.Item.State))
+		if summary := strings.TrimSpace(item.Item.Summary); summary != "" {
 			fmt.Fprintf(&b, "   摘要：%s\n", summary)
 		}
-		if result := strings.TrimSpace(item.Result); result != "" {
+		if result := strings.TrimSpace(item.Item.Result); result != "" {
 			fmt.Fprintf(&b, "   结果：%s\n", result)
 		}
-		if deliverySummary, ok := summarizeTaskProductDelivery(deliveriesByTaskID[item.ID]); ok {
+		if deliverySummary, ok := summarizeTaskProductDelivery(item.Type, deliveriesByTaskID[item.Item.ID]); ok {
 			fmt.Fprintf(&b, "   产物交付：%s\n", deliverySummary)
 		}
 	}
@@ -857,64 +1078,121 @@ func pendingArtifactDeliveryIDs(items []tasks.ArtifactDeliveryItem) []string {
 	return ids
 }
 
-func groupArtifactDeliveriesByTaskID(items []tasks.ArtifactDeliveryItem) map[string][]tasks.ArtifactDeliveryItem {
-	grouped := make(map[string][]tasks.ArtifactDeliveryItem)
+func groupArtifactDeliveriesByTaskID(items []artifactDeliverySyncItem) map[string][]artifactDeliverySyncItem {
+	grouped := make(map[string][]artifactDeliverySyncItem)
 	for _, item := range items {
-		grouped[item.Delivery.TaskID] = append(grouped[item.Delivery.TaskID], item)
+		grouped[item.Item.Delivery.TaskID] = append(grouped[item.Item.Delivery.TaskID], item)
 	}
 	return grouped
 }
 
-func summarizeTaskProductDelivery(items []tasks.ArtifactDeliveryItem) (string, bool) {
+func summarizeTaskProductDelivery(noticeType taskReportNoticeType, items []artifactDeliverySyncItem) (string, bool) {
 	if len(items) == 0 {
 		return "", false
 	}
 
 	total := len(items)
-	delivered := 0
-	failed := 0
-	noChannel := 0
-	pending := 0
+	deliveredBefore := 0
+	deliveredNow := 0
+	failedNow := 0
+	noChannelNow := 0
+	deliveredTotal := 0
+	failedTotal := 0
+	noChannelTotal := 0
+	pendingTotal := 0
 	channelLabels := make(map[string]struct{})
+	deliveredNowNames := make([]string, 0, total)
+	failedNowNames := make([]string, 0, total)
+	noChannelNowNames := make([]string, 0, total)
 
 	for _, item := range items {
-		switch item.Delivery.Status {
+		switch item.Item.Delivery.Status {
 		case tasks.ArtifactDeliveryDelivered:
-			delivered++
-			channelLabels[fallbackTaskNoticeValue(item.Delivery.ChannelLabel, "通知渠道")] = struct{}{}
+			deliveredTotal++
+			channelLabels[fallbackTaskNoticeValue(item.Item.Delivery.ChannelLabel, "通知渠道")] = struct{}{}
 		case tasks.ArtifactDeliveryFailed:
-			failed++
+			failedTotal++
 		case tasks.ArtifactDeliveryNoChannel:
-			noChannel++
+			noChannelTotal++
 		default:
-			pending++
+			pendingTotal++
+		}
+
+		switch item.Outcome {
+		case artifactDeliveryOutcomeDelivered:
+			deliveredNow++
+			deliveredNowNames = append(deliveredNowNames, item.Item.Artifact.FileName)
+		case artifactDeliveryOutcomeFailed:
+			failedNow++
+			failedNowNames = append(failedNowNames, item.Item.Artifact.FileName)
+		case artifactDeliveryOutcomeNoChannel:
+			noChannelNow++
+			noChannelNowNames = append(noChannelNowNames, item.Item.Artifact.FileName)
+		case artifactDeliveryOutcomeUnchanged:
+			if item.Item.Delivery.Status == tasks.ArtifactDeliveryDelivered {
+				deliveredBefore++
+			}
 		}
 	}
 
-	if delivered == total {
-		return fmt.Sprintf("本次任务有%d个产物，已发送到%s。", total, joinArtifactDeliveryChannelLabels(channelLabels)), true
-	}
-	if noChannel == total {
-		return fmt.Sprintf("本次任务有%d个产物，但当前没有可用的渠道发送。", total), true
+	if noticeType == taskReportNoticeHistoricalDelivery {
+		var parts []string
+		if deliveredNow > 0 {
+			parts = append(parts, fmt.Sprintf("%s刚刚已重新发送到%s", joinArtifactFileNames(deliveredNowNames), joinArtifactDeliveryChannelLabels(channelLabels)))
+		}
+		if failedNow > 0 {
+			parts = append(parts, fmt.Sprintf("%s这次重新发送失败", joinArtifactFileNames(failedNowNames)))
+		}
+		if noChannelNow > 0 {
+			parts = append(parts, fmt.Sprintf("%s当前仍没有可用渠道发送", joinArtifactFileNames(noChannelNowNames)))
+		}
+		if len(parts) == 0 {
+			return "", false
+		}
+		return strings.Join(parts, "；") + "。", true
 	}
 
 	var parts []string
-	if delivered > 0 {
-		parts = append(parts, fmt.Sprintf("%d个已发送到%s", delivered, joinArtifactDeliveryChannelLabels(channelLabels)))
+	if deliveredNow > 0 {
+		parts = append(parts, fmt.Sprintf("%d个本轮已发送到%s", deliveredNow, joinArtifactDeliveryChannelLabels(channelLabels)))
+	} else if deliveredBefore > 0 {
+		parts = append(parts, fmt.Sprintf("%d个之前已发送到%s", deliveredBefore, joinArtifactDeliveryChannelLabels(channelLabels)))
 	}
-	if failed > 0 {
-		parts = append(parts, fmt.Sprintf("%d个发送失败", failed))
+	if failedNow > 0 {
+		parts = append(parts, fmt.Sprintf("%d个本轮发送失败", failedNow))
 	}
-	if noChannel > 0 {
-		parts = append(parts, fmt.Sprintf("%d个当前没有可用渠道发送", noChannel))
+	if noChannelNow > 0 {
+		parts = append(parts, fmt.Sprintf("%d个本轮当前没有可用渠道发送", noChannelNow))
 	}
-	if pending > 0 {
-		parts = append(parts, fmt.Sprintf("%d个交付状态暂未完成", pending))
+	if len(parts) > 0 {
+		return fmt.Sprintf("本次任务有%d个产物，其中%s。", total, strings.Join(parts, "，")), true
 	}
-	if len(parts) == 0 {
-		return "", false
+
+	if deliveredTotal == total {
+		return fmt.Sprintf("本次任务有%d个产物，已发送到%s。", total, joinArtifactDeliveryChannelLabels(channelLabels)), true
 	}
-	return fmt.Sprintf("本次任务有%d个产物，其中%s。", total, strings.Join(parts, "，")), true
+	if noChannelTotal == total {
+		return fmt.Sprintf("本次任务有%d个产物，但当前没有可用的渠道发送。", total), true
+	}
+	if failedTotal > 0 || pendingTotal > 0 {
+		var finalParts []string
+		if deliveredTotal > 0 {
+			finalParts = append(finalParts, fmt.Sprintf("%d个已发送到%s", deliveredTotal, joinArtifactDeliveryChannelLabels(channelLabels)))
+		}
+		if failedTotal > 0 {
+			finalParts = append(finalParts, fmt.Sprintf("%d个发送失败", failedTotal))
+		}
+		if noChannelTotal > 0 {
+			finalParts = append(finalParts, fmt.Sprintf("%d个当前没有可用渠道发送", noChannelTotal))
+		}
+		if pendingTotal > 0 {
+			finalParts = append(finalParts, fmt.Sprintf("%d个交付状态暂未完成", pendingTotal))
+		}
+		if len(finalParts) > 0 {
+			return fmt.Sprintf("本次任务有%d个产物，其中%s。", total, strings.Join(finalParts, "，")), true
+		}
+	}
+	return "", false
 }
 
 func joinArtifactDeliveryChannelLabels(labels map[string]struct{}) string {
@@ -927,6 +1205,47 @@ func joinArtifactDeliveryChannelLabels(labels map[string]struct{}) string {
 	}
 	sort.Strings(items)
 	return strings.Join(items, "、")
+}
+
+func joinArtifactFileNames(names []string) string {
+	cleaned := make([]string, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		cleaned = append(cleaned, name)
+	}
+	if len(cleaned) == 0 {
+		return "这些产物"
+	}
+	return strings.Join(cleaned, "、")
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	items := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		items = append(items, value)
+	}
+	return items
+}
+
+func taskReportNoticeTypeLabel(kind taskReportNoticeType) string {
+	switch kind {
+	case taskReportNoticeHistoricalDelivery:
+		return "历史产物补投递通知"
+	default:
+		return "任务结果汇报"
+	}
 }
 
 func fallbackTaskNoticeValue(value string, fallback string) string {
