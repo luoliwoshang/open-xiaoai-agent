@@ -16,6 +16,7 @@ type ModelConfig struct {
 }
 
 type FileConfig struct {
+	SoulPath string `yaml:"soul_path"`
 	Database struct {
 		DSN string `yaml:"dsn"`
 	} `yaml:"database"`
@@ -42,35 +43,47 @@ type AppConfig struct {
 
 func Load(rootDir string) (*AppConfig, error) {
 	configPath := filepath.Join(rootDir, "config.yaml")
-	soulPath := filepath.Join(rootDir, "SOUL.md")
 
 	configBytes, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("read config.yaml: %w", err)
 	}
 
-	soulBytes, err := os.ReadFile(soulPath)
-	if err != nil {
-		return nil, fmt.Errorf("read SOUL.md: %w", err)
-	}
-
 	var cfg AppConfig
 	if err := yaml.Unmarshal(configBytes, &cfg.FileConfig); err != nil {
 		return nil, fmt.Errorf("decode config.yaml: %w", err)
 	}
+	if err := cfg.normalize(rootDir); err != nil {
+		return nil, err
+	}
+
+	soulBytes, err := os.ReadFile(cfg.SoulPath)
+	if err != nil {
+		return nil, fmt.Errorf("read soul_path %q: %w", cfg.SoulPath, err)
+	}
 
 	cfg.Soul = strings.TrimSpace(string(soulBytes))
 	if cfg.Soul == "" {
-		return nil, fmt.Errorf("SOUL.md is empty")
-	}
-	if err := cfg.normalize(rootDir); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("soul file %q is empty", cfg.SoulPath)
 	}
 
 	return &cfg, nil
 }
 
 func (c *AppConfig) normalize(rootDir string) error {
+	c.SoulPath = strings.TrimSpace(c.SoulPath)
+	if c.SoulPath == "" {
+		return fmt.Errorf("soul_path is required")
+	}
+	if !filepath.IsAbs(c.SoulPath) {
+		c.SoulPath = filepath.Join(rootDir, c.SoulPath)
+	}
+	absSoulPath, err := filepath.Abs(c.SoulPath)
+	if err != nil {
+		return fmt.Errorf("resolve soul_path: %w", err)
+	}
+	c.SoulPath = absSoulPath
+
 	c.Database.DSN = strings.TrimSpace(c.Database.DSN)
 	if c.Database.DSN == "" {
 		return fmt.Errorf("database.dsn is required")

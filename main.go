@@ -54,7 +54,7 @@ func main() {
 	}
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds | log.Lshortfile)
 	log.SetOutput(runtimelogs.NewRecorder(logStore, os.Stderr))
-	log.Printf("loaded SOUL.md (%d chars)", len(appConfig.Soul))
+	log.Printf("loaded soul file: path=%s chars=%d", appConfig.SoulPath, len(appConfig.Soul))
 	log.Printf("loaded models: intent=%s reply=%s", appConfig.Intent.Model, appConfig.Reply.Model)
 	llmClient := llm.NewClient()
 	weatherClient := amap.NewClient(appConfig.AMap.APIKey)

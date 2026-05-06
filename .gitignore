@@ -4,6 +4,7 @@ data/tasks.json
 data/plugins/claude_code.json
 data/conversations.json
 config.yaml
+SOUL.md
 go-instruction-server
 node_modules/
 web/dist/
