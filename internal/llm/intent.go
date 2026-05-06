@@ -148,12 +148,9 @@ func buildIntentMessages(history []Message, text string, completedTasks string) 
 // 4. 如果摘要里给出了 latest_task_id，就必须用它，不要回退到更早任务。
 func buildIntentSystemPrompt() string {
 	return strings.TrimSpace(`
-你是一个小爱音箱外部接管器的工具路由器。
+你是一个工具路由器。
 
-当前系统策略是：拿到 ASR 结果后，外部助手始终接管并负责回复，不再回退给原生小爱。
-
-你的任务只有一个：
-基于当前 ASR 文本和上下文，始终选择一个最合适的已注册工具，并直接返回原生 tool call。
+你的任务是根据当前信息，决策应该使用哪个已注册工具，并直接返回原生 tool call。
 
 不要输出普通文本，不要输出 JSON，不要解释原因。
 每次只能调用一个工具。
