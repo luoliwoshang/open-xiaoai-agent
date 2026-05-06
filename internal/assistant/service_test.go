@@ -136,6 +136,8 @@ type fakeTaskManager struct {
 	submittedSpec       plugin.AsyncTask
 	resultReportItems   []tasks.ResultReportItem
 	resultReportIDs     []string
+	redeliveryItems     []tasks.ResultReportItem
+	redeliveryIDs       []string
 	artifactDeliveries  []tasks.ArtifactDeliveryItem
 	markedResultReports []string
 	noChannelMarkedIDs  []string
@@ -159,6 +161,13 @@ func (m *fakeTaskManager) ListPendingResultReports(limit int) ([]tasks.ResultRep
 	defer m.mu.Unlock()
 	_ = limit
 	return append([]tasks.ResultReportItem(nil), m.resultReportItems...), append([]string(nil), m.resultReportIDs...)
+}
+
+func (m *fakeTaskManager) ListPendingArtifactRedeliveryCandidates(limit int) ([]tasks.ResultReportItem, []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_ = limit
+	return append([]tasks.ResultReportItem(nil), m.redeliveryItems...), append([]string(nil), m.redeliveryIDs...)
 }
 
 func (m *fakeTaskManager) ListTaskArtifactDeliveries(taskIDs []string) []tasks.ArtifactDeliveryItem {
@@ -752,7 +761,7 @@ func TestDeliverTaskResultReportsAppendsAssistantHistory(t *testing.T) {
 
 	now := time.Now()
 	service.history.AppendTurn(historyRef(testHistoryKey), now, "你好", "好的")
-	service.deliverTaskResultReports(testHistoryKey, session)
+	service.deliverTaskResultReports(testHistoryKey, session, false)
 
 	history := service.history.Snapshot(historyRef(testHistoryKey), time.Now())
 	if len(history) != 3 {
@@ -807,7 +816,7 @@ func TestDeliverTaskResultReportsMentionsNoChannelWhenTaskHasProducts(t *testing
 		fakeIntent{},
 		scriptedReply{
 			onResultReport: func(ctx context.Context, history []llm.Message, reportContext string, onDelta func(string) error) error {
-				if !strings.Contains(reportContext, "产物交付：本次任务有1个产物，但当前没有可用的渠道发送。") {
+				if !strings.Contains(reportContext, "产物交付：本次任务有1个产物，其中1个本轮当前没有可用渠道发送。") {
 					t.Fatalf("reportContext = %q", reportContext)
 				}
 				return onDelta("那个网页已经做好了，不过现在还没有可用的渠道发送产物。")
@@ -818,7 +827,7 @@ func TestDeliverTaskResultReportsMentionsNoChannelWhenTaskHasProducts(t *testing
 		&fakeArtifactDeliverer{ok: false},
 	)
 
-	service.deliverTaskResultReports(testHistoryKey, session)
+	service.deliverTaskResultReports(testHistoryKey, session, false)
 
 	if got := taskManager.noChannelMarkedIDs; len(got) != 1 || got[0] != "delivery_1" {
 		t.Fatalf("noChannelMarkedIDs = %#v", got)
@@ -868,7 +877,7 @@ func TestDeliverTaskResultReportsMentionsDeliveredProductsWhenSendSucceeded(t *t
 		fakeIntent{},
 		scriptedReply{
 			onResultReport: func(ctx context.Context, history []llm.Message, reportContext string, onDelta func(string) error) error {
-				if !strings.Contains(reportContext, "产物交付：本次任务有1个产物，已发送到微信。") {
+				if !strings.Contains(reportContext, "产物交付：本次任务有1个产物，其中1个本轮已发送到微信。") {
 					t.Fatalf("reportContext = %q", reportContext)
 				}
 				return onDelta("那个网页已经做好了，相关产物我也已经发到微信了。")
@@ -879,13 +888,88 @@ func TestDeliverTaskResultReportsMentionsDeliveredProductsWhenSendSucceeded(t *t
 		deliverer,
 	)
 
-	service.deliverTaskResultReports(testHistoryKey, session)
+	service.deliverTaskResultReports(testHistoryKey, session, false)
 
 	if len(deliverer.deliveries) != 1 || deliverer.deliveries[0] != "story.txt" {
 		t.Fatalf("deliveries = %#v", deliverer.deliveries)
 	}
 	if len(taskManager.deliveredRecords) != 1 || taskManager.deliveredRecords[0] != "delivery_1" {
 		t.Fatalf("deliveredRecords = %#v", taskManager.deliveredRecords)
+	}
+}
+
+func TestDeliverTaskResultReportsCanAnnounceHistoricalArtifactRedelivery(t *testing.T) {
+	t.Parallel()
+
+	session := &fakeChannel{}
+	taskManager := &fakeTaskManager{
+		redeliveryItems: []tasks.ResultReportItem{{
+			ID:      "task_1",
+			Title:   "星空夜景图",
+			State:   tasks.StateCompleted,
+			Summary: "之前已经完成了一张星空夜景图。",
+			Result:  "图片已经准备好了。",
+		}},
+		redeliveryIDs: []string{"task_1"},
+		artifactDeliveries: []tasks.ArtifactDeliveryItem{{
+			Delivery: tasks.ArtifactDelivery{
+				ID:         "delivery_1",
+				TaskID:     "task_1",
+				ArtifactID: "artifact_1",
+				Status:     tasks.ArtifactDeliveryNoChannel,
+			},
+			Artifact: tasks.Artifact{
+				ID:          "artifact_1",
+				TaskID:      "task_1",
+				Kind:        "image",
+				FileName:    "night-sky.png",
+				MIMEType:    "image/png",
+				StoragePath: "/tmp/night-sky.png",
+				SizeBytes:   12,
+			},
+		}},
+	}
+	deliverer := &fakeArtifactDeliverer{
+		accountID:    "imacct_1",
+		targetID:     "imtarget_1",
+		channelLabel: "微信",
+		ok:           true,
+	}
+
+	service := newTestService(t,
+		Config{AbortAfterASR: false, PostAbortDelay: 0},
+		fakeIntent{},
+		scriptedReply{
+			onResultReport: func(ctx context.Context, history []llm.Message, reportContext string, onDelta func(string) error) error {
+				if !strings.Contains(reportContext, "通知类型：历史产物补投递通知") {
+					t.Fatalf("reportContext = %q", reportContext)
+				}
+				if !strings.Contains(reportContext, "night-sky.png刚刚已重新发送到微信。") {
+					t.Fatalf("reportContext = %q", reportContext)
+				}
+				return onDelta("之前那张星空夜景图我刚刚已经重新发到微信了。")
+			},
+		},
+		fakeTools{},
+		taskManager,
+		deliverer,
+	)
+
+	service.deliverTaskResultReports(testHistoryKey, session, true)
+
+	if len(deliverer.deliveries) != 1 || deliverer.deliveries[0] != "night-sky.png" {
+		t.Fatalf("deliveries = %#v", deliverer.deliveries)
+	}
+	if got := taskManager.markedResultReportsSnapshot(); len(got) != 0 {
+		t.Fatalf("markedResultReports = %#v, want empty", got)
+	}
+	history := service.history.Snapshot(historyRef(testHistoryKey), time.Now())
+	if len(history) == 0 {
+		t.Fatal("history is empty")
+	}
+	last := history[len(history)-1]
+	if last.Role != "assistant" || last.Content != "之前那张星空夜景图我刚刚已经重新发到微信了。" {
+		t.Fatalf("last = %+v", last)
 	}
 }
 
@@ -916,11 +1000,66 @@ func TestDeliverTaskResultReportsUsesChunkedPlayback(t *testing.T) {
 		nil,
 	)
 
-	service.deliverTaskResultReports(testHistoryKey, session)
+	service.deliverTaskResultReports(testHistoryKey, session, false)
 
 	scripts := session.snapshotScripts()
 	if len(scripts) < 2 {
 		t.Fatalf("len(scripts) = %d, want at least 2 chunked tts calls", len(scripts))
+	}
+}
+
+func TestNotifyDefaultArtifactDeliveryChannelReadySyncsWithoutVoice(t *testing.T) {
+	t.Parallel()
+
+	taskManager := &fakeTaskManager{
+		redeliveryItems: []tasks.ResultReportItem{{
+			ID:      "task_1",
+			Title:   "呼吸练习",
+			State:   tasks.StateCompleted,
+			Summary: "网页已经完成。",
+			Result:  "结果已经准备好了。",
+		}},
+		redeliveryIDs: []string{"task_1"},
+		artifactDeliveries: []tasks.ArtifactDeliveryItem{{
+			Delivery: tasks.ArtifactDelivery{
+				ID:         "delivery_1",
+				TaskID:     "task_1",
+				ArtifactID: "artifact_1",
+				Status:     tasks.ArtifactDeliveryNoChannel,
+			},
+			Artifact: tasks.Artifact{
+				ID:          "artifact_1",
+				TaskID:      "task_1",
+				Kind:        "file",
+				FileName:    "breathing.html",
+				MIMEType:    "text/html",
+				StoragePath: "/tmp/breathing.html",
+				SizeBytes:   12,
+			},
+		}},
+	}
+	deliverer := &fakeArtifactDeliverer{
+		accountID:    "imacct_1",
+		targetID:     "imtarget_1",
+		channelLabel: "微信",
+		ok:           true,
+	}
+	service := newTestService(t,
+		Config{AbortAfterASR: false, PostAbortDelay: 0},
+		fakeIntent{},
+		fakeReply{},
+		fakeTools{},
+		taskManager,
+		deliverer,
+	)
+
+	service.NotifyDefaultArtifactDeliveryChannelReady()
+
+	if len(deliverer.deliveries) != 1 || deliverer.deliveries[0] != "breathing.html" {
+		t.Fatalf("deliveries = %#v", deliverer.deliveries)
+	}
+	if got := taskManager.markedResultReportsSnapshot(); len(got) != 0 {
+		t.Fatalf("markedResultReports = %#v, want empty", got)
 	}
 }
 

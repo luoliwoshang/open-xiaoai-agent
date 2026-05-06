@@ -508,6 +508,58 @@ func latestTaskByUpdatedAt(tasks []Task) Task {
 	return latest
 }
 
+// latestTasksByChain 把零散任务按 root task 折叠成“每条任务链只保留最新节点”。
+//
+// 这份视图会同时给：
+// 1. continue_task 意图候选；
+// 2. 主流程任务结果汇报；
+// 3. 历史产物补投递；
+//
+// 统一使用它的原因是：一条任务链一旦继续往后走，中间节点就不应该再被当成“当前有效结果”。
+func latestTasksByChain(tasks []Task) []Task {
+	if len(tasks) == 0 {
+		return nil
+	}
+
+	byID := make(map[string]Task, len(tasks))
+	for _, task := range tasks {
+		taskID := strings.TrimSpace(task.ID)
+		if taskID == "" {
+			continue
+		}
+		byID[taskID] = task
+	}
+
+	latestByRoot := make(map[string]Task)
+	for _, task := range tasks {
+		taskID := strings.TrimSpace(task.ID)
+		if taskID == "" {
+			continue
+		}
+		rootID := resolveIntentTaskChainRootID(task, byID)
+		current, ok := latestByRoot[rootID]
+		if !ok {
+			latestByRoot[rootID] = task
+			continue
+		}
+		if task.UpdatedAt.After(current.UpdatedAt) || (task.UpdatedAt.Equal(current.UpdatedAt) && task.CreatedAt.After(current.CreatedAt)) {
+			latestByRoot[rootID] = task
+		}
+	}
+
+	latest := make([]Task, 0, len(latestByRoot))
+	for _, task := range latestByRoot {
+		latest = append(latest, task)
+	}
+	sort.Slice(latest, func(i, j int) bool {
+		if latest[i].UpdatedAt.Equal(latest[j].UpdatedAt) {
+			return latest[i].CreatedAt.After(latest[j].CreatedAt)
+		}
+		return latest[i].UpdatedAt.After(latest[j].UpdatedAt)
+	})
+	return latest
+}
+
 func buildIntentTaskLineage(latest Task, byID map[string]Task) []Task {
 	var reversed []Task
 	current := latest
@@ -625,15 +677,61 @@ func (m *Manager) ListPendingResultReports(limit int) ([]ResultReportItem, []str
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	tasks := append([]Task(nil), m.state.Tasks...)
-	sort.Slice(tasks, func(i, j int) bool {
-		return tasks[i].UpdatedAt.After(tasks[j].UpdatedAt)
-	})
+	items := make([]ResultReportItem, 0, limit)
+	ids := make([]string, 0, limit)
+	for _, task := range latestTasksByChain(m.state.Tasks) {
+		if !task.ResultReportPending {
+			continue
+		}
+		switch task.State {
+		case StateCompleted, StateFailed, StateCanceled:
+		default:
+			continue
+		}
+		items = append(items, ResultReportItem{
+			ID:      task.ID,
+			Title:   strings.TrimSpace(task.Title),
+			State:   task.State,
+			Summary: strings.TrimSpace(task.Summary),
+			Result:  strings.TrimSpace(task.Result),
+		})
+		ids = append(ids, task.ID)
+		if len(items) >= limit {
+			break
+		}
+	}
+	return items, ids
+}
+
+// ListPendingArtifactRedeliveryCandidates 返回“已经做完正常结果汇报，但仍有未送达产物”的任务链最新节点。
+//
+// 这些候选专门给“默认 IM 渠道后来可用后，再尝试补发旧产物”这条链路使用：
+// 1. 只看每条任务链的最新节点，避免把中间过期节点再拿出来补发；
+// 2. 只看已经完成正常结果汇报的旧任务，因此 result_report_pending 必须为 false；
+// 3. 只要该最新节点下还有任意一个产物没有 delivered，就认为它仍值得进入补发候选。
+func (m *Manager) ListPendingArtifactRedeliveryCandidates(limit int) ([]ResultReportItem, []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	undeliveredTaskIDs := make(map[string]struct{})
+	for _, delivery := range m.state.Deliveries {
+		if delivery.Status == ArtifactDeliveryDelivered {
+			continue
+		}
+		taskID := strings.TrimSpace(delivery.TaskID)
+		if taskID == "" {
+			continue
+		}
+		undeliveredTaskIDs[taskID] = struct{}{}
+	}
 
 	items := make([]ResultReportItem, 0, limit)
 	ids := make([]string, 0, limit)
-	for _, task := range tasks {
-		if !task.ResultReportPending {
+	for _, task := range latestTasksByChain(m.state.Tasks) {
+		if task.ResultReportPending {
+			continue
+		}
+		if _, ok := undeliveredTaskIDs[strings.TrimSpace(task.ID)]; !ok {
 			continue
 		}
 		switch task.State {

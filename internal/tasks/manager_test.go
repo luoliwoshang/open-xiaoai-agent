@@ -613,6 +613,132 @@ func TestTaskChain(t *testing.T) {
 	}
 }
 
+func TestListPendingResultReportsOnlyUsesLatestTaskInChain(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	manager := &Manager{
+		state: fileState{
+			Tasks: []Task{
+				{
+					ID:                  "task_root",
+					Title:               "最早任务",
+					State:               StateCompleted,
+					Summary:             "旧结果",
+					Result:              "旧结果正文",
+					ResultReportPending: true,
+					CreatedAt:           now,
+					UpdatedAt:           now,
+				},
+				{
+					ID:                  "task_child",
+					Title:               "最新任务",
+					ParentTaskID:        "task_root",
+					State:               StateCompleted,
+					Summary:             "新结果",
+					Result:              "新结果正文",
+					ResultReportPending: true,
+					CreatedAt:           now.Add(1 * time.Minute),
+					UpdatedAt:           now.Add(1 * time.Minute),
+				},
+				{
+					ID:                  "task_other",
+					Title:               "另一条链",
+					State:               StateCompleted,
+					Summary:             "另一条结果",
+					Result:              "另一条结果正文",
+					ResultReportPending: true,
+					CreatedAt:           now.Add(2 * time.Minute),
+					UpdatedAt:           now.Add(2 * time.Minute),
+				},
+			},
+		},
+	}
+
+	items, ids := manager.ListPendingResultReports(5)
+	if len(items) != 2 || len(ids) != 2 {
+		t.Fatalf("ListPendingResultReports() lens = (%d, %d), want (2, 2)", len(items), len(ids))
+	}
+	if ids[0] != "task_other" || ids[1] != "task_child" {
+		t.Fatalf("ids = %#v, want [task_other task_child]", ids)
+	}
+	if items[1].Title != "最新任务" {
+		t.Fatalf("items[1].Title = %q, want 最新任务", items[1].Title)
+	}
+}
+
+func TestListPendingArtifactRedeliveryCandidatesOnlyUsesLatestTaskInChain(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	manager := &Manager{
+		state: fileState{
+			Tasks: []Task{
+				{
+					ID:                  "task_root",
+					Title:               "旧图片任务",
+					State:               StateCompleted,
+					Summary:             "旧图已完成",
+					Result:              "旧图结果",
+					ResultReportPending: false,
+					CreatedAt:           now,
+					UpdatedAt:           now,
+				},
+				{
+					ID:                  "task_child",
+					Title:               "最新图片任务",
+					ParentTaskID:        "task_root",
+					State:               StateCompleted,
+					Summary:             "新图已完成",
+					Result:              "新图结果",
+					ResultReportPending: false,
+					CreatedAt:           now.Add(1 * time.Minute),
+					UpdatedAt:           now.Add(1 * time.Minute),
+				},
+				{
+					ID:                  "task_running",
+					Title:               "还在运行的链尾",
+					State:               StateRunning,
+					ResultReportPending: false,
+					CreatedAt:           now.Add(2 * time.Minute),
+					UpdatedAt:           now.Add(2 * time.Minute),
+				},
+			},
+			Deliveries: []ArtifactDelivery{
+				{
+					ID:         "delivery_root",
+					TaskID:     "task_root",
+					ArtifactID: "artifact_root",
+					Status:     ArtifactDeliveryNoChannel,
+				},
+				{
+					ID:         "delivery_child",
+					TaskID:     "task_child",
+					ArtifactID: "artifact_child",
+					Status:     ArtifactDeliveryNoChannel,
+				},
+				{
+					ID:         "delivery_running",
+					TaskID:     "task_running",
+					ArtifactID: "artifact_running",
+					Status:     ArtifactDeliveryNoChannel,
+				},
+			},
+		},
+	}
+
+	items, ids := manager.ListPendingArtifactRedeliveryCandidates(5)
+	if len(items) != 1 || len(ids) != 1 {
+		t.Fatalf("ListPendingArtifactRedeliveryCandidates() lens = (%d, %d), want (1, 1)", len(items), len(ids))
+	}
+	if ids[0] != "task_child" {
+		t.Fatalf("ids[0] = %q, want task_child", ids[0])
+	}
+	if items[0].Title != "最新图片任务" {
+		t.Fatalf("items[0].Title = %q, want 最新图片任务", items[0].Title)
+	}
+}
+
 func taskIDs(chain []Task) []string {
 	ids := make([]string, len(chain))
 	for i, t := range chain {

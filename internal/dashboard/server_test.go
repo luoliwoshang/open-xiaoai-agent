@@ -30,6 +30,7 @@ type fakeConversations struct {
 	runtime       assistant.RuntimeStatus
 	submittedText string
 	submitErr     error
+	imReadyCalls  int
 }
 
 func (f *fakeConversations) SnapshotConversations() []assistant.ConversationSnapshot {
@@ -51,6 +52,10 @@ func (f *fakeConversations) SubmitRecognizedText(text string) error {
 	}
 	f.submittedText = text
 	return nil
+}
+
+func (f *fakeConversations) NotifyDefaultArtifactDeliveryChannelReady() {
+	f.imReadyCalls++
 }
 
 type fakeSettings struct {
@@ -720,6 +725,25 @@ func TestHandleWeChatLoginConfirmPersistsAfterExplicitConfirmation(t *testing.T)
 	}
 	if payload.Account.RemoteAccountID != "bot@im.bot" {
 		t.Fatalf("RemoteAccountID = %q, want bot@im.bot", payload.Account.RemoteAccountID)
+	}
+}
+
+func TestHandleIMDeliverySettingsNotifiesAssistantWhenEnabled(t *testing.T) {
+	t.Parallel()
+
+	conversations := &fakeConversations{}
+	imGateway := &fakeIM{}
+	server := New(":0", nil, nil, conversations, &fakeXiaoAI{}, &fakeSettings{snapshot: settings.Snapshot{SessionWindowSeconds: 300}}, &fakeMemory{}, imGateway, &fakeLogs{})
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/im-delivery", strings.NewReader(`{"enabled":true,"selected_account_id":"account_1","selected_target_id":"target_1"}`))
+	recorder := httptest.NewRecorder()
+
+	server.handleIMDeliverySettings(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if conversations.imReadyCalls != 1 {
+		t.Fatalf("imReadyCalls = %d, want 1", conversations.imReadyCalls)
 	}
 }
 
