@@ -154,9 +154,12 @@ func makeSDKTools(defs []llm.ToolDefinition) []openai.ChatCompletionToolUnionPar
 func buildSDKProbeMessages(text string) []openai.ChatCompletionMessageParamUnion {
 	return []openai.ChatCompletionMessageParamUnion{
 		openai.SystemMessage(strings.TrimSpace(`
-你是一个小爱音箱外部接管器的工具路由器。
+你是一个工具路由器。
 
-当前系统策略是：拿到 ASR 结果后，外部助手始终接管并负责回复，不再回退给原生小爱。
+你的任务是根据当前信息，决策应该使用哪个已注册工具，并直接返回原生 tool call。
+
+不要输出普通文本，不要输出 JSON，不要解释原因。
+每次只能调用一个工具。
 
 规则：
 1. 当用户只是普通聊天、解释、建议、总结、延伸问答、不需要任何外部动作或取数时，调用 continue_chat。
