@@ -1,3 +1,5 @@
+soul_path: ./SOUL.md
+
 database:
   dsn: root:root@tcp(127.0.0.1:3306)/open_xiaoai_agent
 

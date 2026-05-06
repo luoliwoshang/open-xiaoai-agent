@@ -76,6 +76,8 @@ cp config.example.yaml config.yaml
 按需修改 `config.yaml`：
 
 ```yaml
+soul_path: ./SOUL.md
+
 database:
   dsn: root:root@tcp(127.0.0.1:3306)/open_xiaoai_agent
 
@@ -99,7 +101,7 @@ im:
   media_cache_dir: .cache/im-media
 ```
 
-> `SOUL.md` 定义小爱的人设。`config.yaml` 已被 `.gitignore` 忽略，不要提交真实密钥。
+> `soul_path` 用来指定人设文件。它是必填项，支持相对路径和完整绝对路径；如果缺少或文件不存在，服务会在启动时直接报错退出。`config.yaml` 已被 `.gitignore` 忽略，不要提交真实密钥。
 
 **2. 启动 MySQL 并运行**
 

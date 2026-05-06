@@ -25,6 +25,7 @@ import (
 //
 // 这个测试只用于本地调试，不是 CI 里的稳定断言：
 //   - 如果仓库根目录没有 config.yaml，会直接 skip；
+//   - 如果本地 config.yaml 缺少运行所需字段（例如 soul_path），也会 skip；
 //   - 如果 intent 配置还是 placeholder，也会 skip；
 //   - 探测文本固定为“帮我做一个文本文件”，用于稳定观察当前 provider
 //     在同一条样本下到底是否返回 native tool_call。
@@ -46,7 +47,7 @@ func TestIntentSDKChatCompletionsLiveProbe(t *testing.T) {
 
 	appConfig, err := config.Load(rootDir)
 	if err != nil {
-		t.Fatalf("load local config: %v", err)
+		t.Skipf("skip live sdk intent probe: local config is not ready: %v", err)
 	}
 	if shouldSkipLiveIntentConfig(appConfig.Intent) {
 		t.Skip("skip live sdk intent probe: intent model config is empty or still placeholder")

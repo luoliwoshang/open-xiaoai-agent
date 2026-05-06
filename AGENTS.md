@@ -156,7 +156,8 @@ go run .
 ## 配置文件
 
 - `SOUL.md`
-  - 主回复模型的人设 / 系统风格
+  - 常见的人设文件命名约定之一
+  - 当前不会自动读取它，只有 `config.yaml` 里的 `soul_path` 显式指向它时才会加载
 - `config.example.yaml`
   - 提交到仓库中的示例配置
 - `config.yaml`
@@ -165,6 +166,7 @@ go run .
 
 当前使用到的配置域：
 
+- `soul_path`
 - `database.dsn`
 - `task.artifact_cache_dir`
 - `openai.base_url`
@@ -177,6 +179,7 @@ go run .
 
 - `config.yaml` 故意被忽略
 - 不要提交真实 API key
+- `soul_path` 是必填项，支持相对路径和绝对路径；相对路径按仓库根目录解析
 - 运行时数据库配置只从 `config.yaml` 的 `database.dsn` 读取
 
 ## 持久化状态
