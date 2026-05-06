@@ -126,6 +126,8 @@ echo 'ws://你的局域网IP:4399' > /data/open-xiaoai/server.txt
 curl -sSfL https://gitee.com/idootop/artifacts/releases/download/open-xiaoai-client/init.sh | sh
 ```
 
+> **注意**：当前版本暂不支持语音打断。小爱播报时不会响应新的唤醒词，请等小爱说完再下达新指令。
+
 ## 常用命令
 
 ```sh
