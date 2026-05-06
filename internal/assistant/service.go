@@ -833,6 +833,12 @@ func (s *Service) deliverTaskResultReports(historyKey string, channel voice.Chan
 	if reportContext == "" {
 		return
 	}
+	log.Printf(
+		"task result report prepared: include_historical=%t notice_count=%d report_context=%q",
+		includeHistorical,
+		len(notices),
+		reportContext,
+	)
 	history := s.history.Snapshot(historyRef(historyKey), time.Now())
 	replyHistory := withMemoryMessage(history, s.recallMemory(historyKey))
 
@@ -858,6 +864,13 @@ func (s *Service) deliverTaskResultReports(historyKey string, channel voice.Chan
 		log.Printf("task result report returned empty text")
 		return
 	}
+	log.Printf(
+		"task result report generated: include_historical=%t history_key=%s report_context=%q final_reply=%q",
+		includeHistorical,
+		strings.TrimSpace(historyKey),
+		reportContext,
+		finalReply,
+	)
 
 	s.appendConversationTurn(historyKey, time.Now(), "task_result_report", llm.Message{Role: "assistant", Content: finalReply})
 	s.mirrorReply(finalReply)
